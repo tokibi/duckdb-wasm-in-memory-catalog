@@ -28,9 +28,9 @@ flowchart LR
 
 ## Live demo
 
-The GitHub Pages demo publishes a generated Parquet fixture at `data/demo.parquet`. The browser inserts that same-origin HTTPS URL into the Catalog snapshot, then DuckDB-Wasm reads the Parquet file through its normal HTTP filesystem when SQL touches the table.
+The GitHub Pages demo publishes a small Parquet fixture at `data/demo.parquet`. The browser inserts that same-origin HTTPS URL into the Catalog snapshot, then DuckDB-Wasm reads the Parquet file through its normal HTTP filesystem when SQL touches the table.
 
-The demo lets you edit both the Catalog JSON and SQL before running the query. `$DEMO_FILE` resolves to the Pages-hosted Parquet URL and `$DEMO_CONTENT_VERSION` resolves to the generated fixture hash.
+The demo lets you edit both the Catalog JSON and SQL before running the query. `$DEMO_FILE` resolves to the Pages-hosted Parquet URL and `$DEMO_CONTENT_VERSION` resolves to the fixture hash.
 
 ```text
 Catalog metadata
@@ -105,7 +105,6 @@ Requirements:
 
 - Node.js 22
 - Git submodules
-- CMake for the native DuckDB demo fixture build
 - Emscripten 3.1.56 for Wasm builds
 
 ```sh
@@ -125,7 +124,6 @@ build/wasm_eh/extension/in_memory_catalog/in_memory_catalog.duckdb_extension.was
 To build and preview the same static artifact published by GitHub Pages:
 
 ```sh
-make build
 make build-wasm
 npm run build:pages
 npm run serve:pages

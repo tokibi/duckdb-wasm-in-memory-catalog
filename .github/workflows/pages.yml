@@ -19,7 +19,7 @@ jobs:
     name: Build demo site
     if: ${{ github.event.repository.visibility == 'public' }}
     runs-on: ubuntu-latest
-    timeout-minutes: 45
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v5
         with:
@@ -28,7 +28,6 @@ jobs:
         with:
           node-version: 22
       - run: npm install --ignore-scripts --no-audit --no-fund
-      - run: make build
       - uses: emscripten-core/setup-emsdk@v15
         with:
           version: '3.1.56'

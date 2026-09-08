@@ -1,11 +1,9 @@
 import { createHash } from 'node:crypto'
-import { execFile } from 'node:child_process'
-import { cp, mkdir, readFile, rm, stat, writeFile } from 'node:fs/promises'
+import { cp, mkdir, rm, writeFile } from 'node:fs/promises'
 import { resolve } from 'node:path'
-import { promisify } from 'node:util'
 
-const execFileAsync = promisify(execFile)
 const outputRoot = resolve('build/pages')
+const fixtureSource = 'https://blobs.duckdb.org/data/tpch-sf0.01-parquet/nation.parquet'
 
 async function copy(source, destination) {
   await mkdir(resolve(outputRoot, destination, '..'), { recursive: true })
@@ -49,45 +47,30 @@ await copy(
   'extension/in_memory_catalog.duckdb_extension.wasm',
 )
 
+const fixtureResponse = await fetch(fixtureSource)
+if (!fixtureResponse.ok) {
+  throw new Error(`Demo Parquet download failed: HTTP ${fixtureResponse.status}`)
+}
+const fixtureBytes = Buffer.from(await fixtureResponse.arrayBuffer())
 const fixturePath = resolve(outputRoot, 'data/demo.parquet')
 await mkdir(resolve(outputRoot, 'data'), { recursive: true })
-const sqlPath = fixturePath.replaceAll("'", "''")
-const fixtureRows = 50_000
-const fixtureSql = `
-COPY (
-  SELECT
-    i::BIGINT AS id,
-    (i % 8)::INTEGER AS group_id,
-    CASE (i % 4)
-      WHEN 0 THEN 'alpha'
-      WHEN 1 THEN 'beta'
-      WHEN 2 THEN 'gamma'
-      ELSE 'delta'
-    END::VARCHAR AS category,
-    round((sin(i * 0.017) * 50) + (i % 8), 3)::DOUBLE AS metric
-  FROM range(0, ${fixtureRows}) AS t(i)
-) TO '${sqlPath}' (FORMAT PARQUET, COMPRESSION ZSTD, ROW_GROUP_SIZE 10000);
-`
+await writeFile(fixturePath, fixtureBytes)
 
-await execFileAsync(resolve('build/native/duckdb'), ['-c', fixtureSql])
-
-const fixtureBytes = await readFile(fixturePath)
-const fixtureStat = await stat(fixturePath)
 const digest = createHash('sha256').update(fixtureBytes).digest('hex')
 const metadata = {
   formatVersion: 1,
   contentVersion: digest,
-  bytes: fixtureStat.size,
-  rows: fixtureRows,
+  bytes: fixtureBytes.byteLength,
+  rows: 25,
   columns: [
-    { name: 'id', type: 'BIGINT', nullable: true },
-    { name: 'group_id', type: 'INTEGER', nullable: true },
-    { name: 'category', type: 'VARCHAR', nullable: true },
-    { name: 'metric', type: 'DOUBLE', nullable: true },
+    { name: 'n_nationkey', type: 'INTEGER', nullable: true },
+    { name: 'n_name', type: 'VARCHAR', nullable: true },
+    { name: 'n_regionkey', type: 'INTEGER', nullable: true },
+    { name: 'n_comment', type: 'VARCHAR', nullable: true },
   ],
 }
 await writeFile(resolve(outputRoot, 'data/demo.json'), `${JSON.stringify(metadata, null, 2)}\n`)
 
 process.stdout.write(
-  `Built GitHub Pages demo: ${fixtureRows.toLocaleString()} rows, ${fixtureStat.size.toLocaleString()} bytes\n`,
+  `Built GitHub Pages demo: ${metadata.rows} rows, ${fixtureBytes.byteLength.toLocaleString()} bytes\n`,
 )

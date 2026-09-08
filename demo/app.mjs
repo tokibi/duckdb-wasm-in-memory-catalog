@@ -23,12 +23,11 @@ const rootUrl = new URL('./', import.meta.url)
 const defaultStatus =
   'The default table points to a Parquet file published by this GitHub Pages site and is read directly over HTTPS.'
 const defaultSql = `SELECT
-  category,
-  count(*) AS rows,
-  round(avg(metric), 2) AS avg_metric
-FROM demo.analytics.events
-GROUP BY category
-ORDER BY category;`
+  n_regionkey,
+  count(*) AS nations
+FROM demo.analytics.nation
+GROUP BY n_regionkey
+ORDER BY n_regionkey;`
 
 let activeRuntime = null
 let metadataPromise = null
@@ -51,7 +50,7 @@ function defaultCatalog(metadata) {
         name: 'analytics',
         tables: [
           {
-            name: 'events',
+            name: 'nation',
             snapshot: '$DEMO_CONTENT_VERSION',
             columns: metadata.columns,
             files: [{ uri: '$DEMO_FILE' }],
