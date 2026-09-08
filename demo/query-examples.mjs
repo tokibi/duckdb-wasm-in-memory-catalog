@@ -1,3 +1,15 @@
+import { InMemoryCatalogController } from './in-memory-catalog/in-memory-catalog-controller.mjs'
+
+const originalClose = InMemoryCatalogController.prototype.close
+InMemoryCatalogController.prototype.close = async function closeDemoCatalog() {
+  try {
+    await this.connection.query('USE memory')
+  } catch {
+    // The connection may already be closing. Preserve the controller's close behavior.
+  }
+  return originalClose.call(this)
+}
+
 const sqlEditor = document.querySelector('#sql-editor')
 const catalogNameInput = document.querySelector('#catalog-name')
 const catalogEditor = document.querySelector('#catalog-editor')
@@ -45,7 +57,7 @@ function examplesFor(target) {
   const table = qualifiedTable(target)
   return {
     metadata: `DESCRIBE ${table};`,
-    tables: `SHOW TABLES;`,
+    tables: `SHOW ALL TABLES;`,
     rows: `SELECT *\nFROM ${table}\nLIMIT 10;`,
     aggregate: `SELECT\n  n_regionkey,\n  count(*) AS nations\nFROM ${table}\nGROUP BY n_regionkey\nORDER BY n_regionkey;`,
   }
