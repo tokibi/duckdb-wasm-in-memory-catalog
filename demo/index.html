@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <meta
       name="description"
-      content="Live browser demo of DuckDB-Wasm In-Memory Catalog reading Parquet directly from GitHub Pages over HTTPS."
+      content="Live browser demo of DuckDB-Wasm In-Memory Catalog resolving hosted file metadata and querying it directly over HTTPS."
     >
     <title>DuckDB-Wasm In-Memory Catalog</title>
     <link rel="icon" href="data:,">
@@ -35,10 +35,10 @@
     <main>
       <section class="hero">
         <div class="eyebrow">Browser-only metadata catalog</div>
-        <h1>Publish metadata.<br>Query remote Parquet.</h1>
+        <h1>Publish metadata.<br>Query remote files.</h1>
         <p class="hero-copy">
           Application-owned schema and file metadata become an ordinary read-only DuckDB catalog.
-          This demo reads a Parquet file hosted by GitHub Pages directly over HTTPS.
+          This demo reads a hosted file from GitHub Pages directly over HTTPS.
         </p>
         <div class="hero-actions">
           <a class="button primary" href="#demo">Try the demo</a>
@@ -47,8 +47,8 @@
         <div class="badges" aria-label="Project highlights">
           <span>DuckDB-Wasm</span>
           <span>Read-only catalog</span>
+          <span>Opaque file URIs</span>
           <span>Direct HTTPS</span>
-          <span>Parquet</span>
         </div>
       </section>
 
@@ -68,8 +68,8 @@
           <article class="flow-card accent">
             <span class="flow-index">02</span>
             <h3>DuckDB-Wasm</h3>
-            <p>When SQL touches a table, DuckDB reads its Parquet file directly from GitHub Pages.</p>
-            <code>SQL → HTTPS Range GET</code>
+            <p>When SQL touches a table, DuckDB resolves and reads its file through the configured filesystem.</p>
+            <code>SQL → file access</code>
           </article>
         </div>
       </section>
@@ -192,17 +192,17 @@
               <div class="query-example-grid">
                 <button class="query-example" type="button" data-query-example="metadata" data-query-label="Table metadata">
                   <strong>Table metadata</strong>
-                  <span>Inspect columns and types without scanning the Parquet rows.</span>
+                  <span>Inspect columns and types without scanning the hosted file.</span>
                   <code>DESCRIBE demo.analytics.nation;</code>
                 </button>
                 <button class="query-example" type="button" data-query-example="tables" data-query-label="List tables">
                   <strong>List tables</strong>
                   <span>Enumerate tables in the current Catalog schema.</span>
-                  <code>SHOW TABLES;</code>
+                  <code>SHOW ALL TABLES;</code>
                 </button>
                 <button class="query-example" type="button" data-query-example="rows" data-query-label="Preview rows">
                   <strong>Preview rows</strong>
-                  <span>Read a small sample from the hosted Parquet file.</span>
+                  <span>Read a small sample from the hosted file.</span>
                   <code>SELECT * … LIMIT 10;</code>
                 </button>
                 <button class="query-example" type="button" data-query-example="aggregate" data-query-label="Aggregate by region">
