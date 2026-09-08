@@ -30,7 +30,7 @@ flowchart LR
 
 The GitHub Pages demo publishes a small Parquet fixture at `data/demo.parquet`. The browser inserts that same-origin HTTPS URL into the Catalog snapshot, then DuckDB-Wasm reads the Parquet file through its normal HTTP filesystem when SQL touches the table.
 
-The demo lets you edit both the Catalog JSON and SQL before running the query. `$DEMO_FILE` resolves to the Pages-hosted Parquet URL and `$DEMO_CONTENT_VERSION` resolves to the fixture hash.
+The DuckDB-Wasm runtime and default Catalog start automatically when the page opens. The demo shows the hosted fixture URL, row count, size, and columns alongside the runtime state. The Catalog JSON contains the resolved Pages URL and fixture content hash directly, and both the Catalog JSON and SQL remain editable before running a query.
 
 ```text
 Catalog metadata
