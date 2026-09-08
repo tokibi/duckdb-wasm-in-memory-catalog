@@ -128,7 +128,7 @@ h1 {
   letter-spacing: 0.1em;
   text-transform: uppercase;
 }
-.component-header h3, .query-heading h3, .result-header h4 {
+.component-header h3, .query-heading h3, .result-header h4, .query-examples-header h4 {
   margin: 0;
   letter-spacing: -0.025em;
 }
@@ -241,6 +241,53 @@ h1 {
 .query-state .status-dot { margin: 0; }
 .run-button { min-width: 108px; }
 .query-body { display: grid; gap: 16px; padding: 24px; }
+
+.query-examples {
+  padding: 16px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--surface-soft) 64%, var(--surface));
+}
+.query-examples-header {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 20px;
+  margin-bottom: 12px;
+}
+.query-examples-header h4 { font-size: 15px; }
+.query-examples-header p { margin: 0; color: var(--muted); font-size: 12px; }
+.query-example-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 9px; }
+.query-example {
+  min-width: 0;
+  padding: 13px 14px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--surface);
+  color: var(--ink);
+  text-align: left;
+  cursor: pointer;
+  transition: border-color 120ms ease, transform 120ms ease, background 120ms ease;
+}
+.query-example:hover {
+  transform: translateY(-1px);
+  border-color: color-mix(in srgb, var(--ink) 40%, var(--line));
+  background: color-mix(in srgb, var(--accent) 10%, var(--surface));
+}
+.query-example:focus-visible { outline: none; border-color: var(--ink); box-shadow: 0 0 0 3px color-mix(in srgb, var(--ink) 10%, transparent); }
+.query-example strong { display: block; font: inherit; font-size: 13px; font-weight: 750; }
+.query-example span { display: block; margin-top: 3px; color: var(--muted); font-size: 11px; line-height: 1.45; }
+.query-example code {
+  display: block;
+  margin-top: 9px;
+  overflow: hidden;
+  color: var(--ink);
+  font-size: 11px;
+  line-height: 1.4;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .query-feedback {
   padding: 11px 13px;
   border: 1px solid var(--line);
@@ -309,9 +356,9 @@ footer { padding: 32px 0 50px; border-top: 1px solid var(--line); display: flex;
   main, footer { width: min(100% - 28px, 1160px); }
   .site-header nav a:last-child { display: none; }
   .hero { padding: 70px 0 64px; }
-  .flow-grid, .setup-grid { grid-template-columns: 1fr; }
+  .flow-grid, .setup-grid, .query-example-grid { grid-template-columns: 1fr; }
   .flow-arrow { transform: rotate(90deg); min-height: 20px; }
-  .demo-heading, .query-toolbar { align-items: stretch; flex-direction: column; }
+  .demo-heading, .query-toolbar, .query-examples-header { align-items: stretch; flex-direction: column; }
   .query-toolbar .run-button { align-self: flex-start; }
   .catalog-editor { min-height: 330px; }
   footer { flex-direction: column; }
