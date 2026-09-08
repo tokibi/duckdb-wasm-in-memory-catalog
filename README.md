@@ -28,7 +28,7 @@ flowchart LR
 
 ## Live demo
 
-The GitHub Pages demo publishes a small Parquet fixture at `data/demo.parquet`. The browser inserts that same-origin HTTPS URL into the Catalog snapshot, then DuckDB-Wasm reads the Parquet file through its normal HTTP filesystem when SQL touches the table.
+The GitHub Pages demo publishes a small hosted fixture at `data/demo.parquet`. The browser inserts that same-origin HTTPS URL into the Catalog snapshot, then DuckDB-Wasm resolves and reads the file through its configured HTTP filesystem when SQL touches the table. The demo fixture happens to be Parquet; the Catalog contract itself is format-agnostic.
 
 The DuckDB-Wasm runtime and default Catalog start automatically when the page opens. The demo shows the hosted fixture URL, row count, size, and columns alongside the runtime state. The Catalog JSON contains the resolved Pages URL and fixture content hash directly, and both the Catalog JSON and SQL remain editable before running a query.
 
@@ -39,7 +39,7 @@ Catalog metadata
       ▼
 DuckDB-Wasm
       │
-      │ HTTPS / HTTP Range
+      │ configured filesystem
       ▼
 GitHub Pages
 ```
@@ -65,7 +65,7 @@ Example snapshot:
         { name: 'category', type: 'VARCHAR', nullable: true },
       ],
       files: [
-        { uri: 'https://example.test/events-r42.parquet' },
+        { uri: 'https://example.test/events-r42' },
       ],
     }],
   }],
@@ -74,9 +74,9 @@ Example snapshot:
 
 ## File contract
 
-The current scan implementation loads DuckDB's Parquet dependency and validates each Parquet file against the published column count, order, names, and types.
+The Catalog treats `files[].uri` as an opaque file identifier and does not encode a file format in the snapshot contract. Format-specific scanning belongs to the DuckDB integration layer.
 
-Parquet is a consumer constraint of the current Catalog integration, not part of the file URI contract.
+The current scanner implementation uses DuckDB's Parquet reader and validates the physical schema against the published column count, order, names, and types. Other scanners, such as CSV, can be added without changing the Catalog snapshot or file URI contract.
 
 ## Runtime ownership
 
