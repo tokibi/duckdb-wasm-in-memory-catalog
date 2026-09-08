@@ -82,12 +82,8 @@
           </div>
           <div class="demo-actions">
             <button class="button secondary" id="reset-demo" type="button">Reset editors</button>
-            <button class="button primary" id="run-demo" type="button">Run SQL</button>
           </div>
         </div>
-        <p class="demo-intro" id="demo-status" aria-live="polite">
-          Starting DuckDB-Wasm runtime…
-        </p>
 
         <div class="demo-layout">
           <div class="demo-sidebar">
@@ -101,10 +97,6 @@
                 <li data-step="catalog" data-state="idle">
                   <span class="step-dot"></span>
                   <div><strong>In-Memory Catalog</strong><small data-step-detail>Waiting</small></div>
-                </li>
-                <li data-step="query" data-state="idle">
-                  <span class="step-dot"></span>
-                  <div><strong>DuckDB query</strong><small data-step-detail>Waiting</small></div>
                 </li>
               </ol>
             </div>
@@ -143,6 +135,7 @@
           </div>
 
           <div class="panel editor-panel">
+            <div class="panel-title">Catalog</div>
             <div class="editor-field compact-field">
               <label for="catalog-name">Catalog name</label>
               <input class="editor-input" id="catalog-name" type="text" value="demo" spellcheck="false">
@@ -152,24 +145,43 @@
               <label for="catalog-editor">Catalog JSON</label>
               <textarea class="editor-textarea catalog-editor" id="catalog-editor" spellcheck="false" aria-label="Catalog JSON"></textarea>
             </div>
-
-            <div class="editor-field">
-              <label for="sql-editor">SQL</label>
-              <textarea class="editor-textarea sql-editor" id="sql-editor" spellcheck="false" aria-label="SQL query"></textarea>
-            </div>
           </div>
         </div>
 
-        <div class="panel results-panel">
-          <div class="panel-title split-title">
-            <span>Query result</span>
-            <span class="mono-label" id="result-summary">—</span>
+        <div class="panel query-panel">
+          <div class="query-header">
+            <div>
+              <div class="panel-title">Query</div>
+              <ol class="steps query-steps">
+                <li data-step="query" data-state="idle">
+                  <span class="step-dot"></span>
+                  <div><strong>DuckDB query</strong><small data-step-detail>Waiting</small></div>
+                </li>
+              </ol>
+            </div>
+            <button class="button primary" id="run-demo" type="button">Run SQL</button>
           </div>
-          <div class="table-scroll">
-            <table>
-              <thead id="result-head"></thead>
-              <tbody id="result-body"></tbody>
-            </table>
+
+          <div class="editor-field query-editor-field">
+            <label for="sql-editor">SQL</label>
+            <textarea class="editor-textarea sql-editor" id="sql-editor" spellcheck="false" aria-label="SQL query"></textarea>
+          </div>
+
+          <div class="query-message" id="demo-status" aria-live="polite">
+            Starting DuckDB-Wasm runtime…
+          </div>
+
+          <div class="query-results">
+            <div class="panel-title split-title">
+              <span>Query result</span>
+              <span class="mono-label" id="result-summary">—</span>
+            </div>
+            <div class="table-scroll">
+              <table>
+                <thead id="result-head"></thead>
+                <tbody id="result-body"></tbody>
+              </table>
+            </div>
           </div>
         </div>
 
