@@ -3,7 +3,8 @@ import { InMemoryCatalogController } from './in-memory-catalog/in-memory-catalog
 
 const runButton = document.querySelector('#run-demo')
 const resetButton = document.querySelector('#reset-demo')
-const statusText = document.querySelector('#demo-status')
+const runtimeStatus = document.querySelector('#runtime-status')
+const queryMessage = document.querySelector('#query-message')
 const catalogNameInput = document.querySelector('#catalog-name')
 const catalogEditor = document.querySelector('#catalog-editor')
 const sqlEditor = document.querySelector('#sql-editor')
@@ -89,10 +90,20 @@ function setStep(name, state, detail = '') {
   if (detailElement) detailElement.textContent = detail || 'Waiting'
 }
 
+function setRuntimeStatus(state, label) {
+  runtimeStatus.dataset.state = state
+  runtimeStatus.textContent = label
+}
+
+function setQueryMessage(kind, message) {
+  queryMessage.dataset.kind = kind
+  queryMessage.textContent = message
+}
+
 function resetRuntimeView() {
   setStep('source', 'idle', 'Waiting')
   setStep('catalog', 'idle', 'Waiting')
-  setStep('query', 'idle', 'Waiting')
+  setStep('query', 'idle', 'Waiting for runtime')
 }
 
 function resetResultView() {
@@ -117,10 +128,15 @@ async function resetEditors({ announce = true } = {}) {
   catalogNameInput.value = 'demo'
   catalogEditor.value = `${JSON.stringify(defaultCatalog(metadata, parquetUrl), null, 2)}\n`
   sqlEditor.value = defaultSql
+  resetResultView()
   if (announce) {
-    statusText.textContent = activeRuntime
-      ? 'Editors reset. Runtime is ready; Run SQL to apply the default catalog.'
-      : 'Editors reset. Reload the page to retry runtime startup.'
+    setQueryMessage(
+      activeRuntime ? 'idle' : 'error',
+      activeRuntime
+        ? 'Demo reset. Runtime is ready to run the default query.'
+        : 'Demo reset, but the runtime is unavailable. Reload the page to retry startup.',
+    )
+    setStep('query', activeRuntime ? 'idle' : 'error', activeRuntime ? 'Ready' : 'Runtime unavailable')
   }
 }
 
@@ -199,6 +215,7 @@ function renderResult(result) {
   }
 
   resultSummary.textContent = `${rows.length.toLocaleString()} row${rows.length === 1 ? '' : 's'}`
+  return rows.length
 }
 
 async function probeParquet(parquetUrl) {
@@ -306,7 +323,8 @@ async function cleanupRuntime() {
 async function startRuntime() {
   resetRuntimeView()
   resetResultView()
-  statusText.textContent = 'Starting DuckDB-Wasm runtime…'
+  setRuntimeStatus('starting', 'Starting')
+  setQueryMessage('idle', 'Waiting for the runtime to become ready.')
 
   let worker
   let database
@@ -369,13 +387,16 @@ async function startRuntime() {
         ? `Current schema: ${catalogName}.${initializedCatalog.defaultSchema}`
         : `Read-only catalog attached as ${catalogName}`,
     )
+    setRuntimeStatus('ready', 'Ready')
     setStep('query', 'idle', 'Ready')
-    statusText.textContent = 'Runtime ready. Edit the catalog or SQL, then run the query.'
+    setQueryMessage('idle', 'Runtime ready. Edit the SQL or catalog metadata, then run the query.')
   } catch (error) {
     console.error(error)
-    statusText.textContent = error instanceof Error ? error.message : String(error)
+    setRuntimeStatus('error', 'Failed')
     const active = [...steps.values()].find((element) => element.dataset.state === 'active')
     if (active) active.dataset.state = 'error'
+    setStep('query', 'error', 'Runtime unavailable')
+    setQueryMessage('error', 'Runtime startup failed. Reload the page to retry.')
     logOutput.textContent = error instanceof Error ? error.stack || error.message : String(error)
     await catalog?.close().catch(() => {})
     await database?.terminate().catch(() => {})
@@ -385,25 +406,30 @@ async function startRuntime() {
 }
 
 async function runDemo() {
-  if (!activeRuntime) return
+  if (!activeRuntime) {
+    setStep('query', 'error', 'Runtime unavailable')
+    setQueryMessage('error', 'DuckDB-Wasm runtime is not ready. Reload the page to retry startup.')
+    return
+  }
 
   runButton.disabled = true
   resetButton.disabled = true
   runButton.textContent = 'Running…'
   resetResultView()
+  setStep('query', 'active', 'Applying catalog')
+  setQueryMessage('running', 'Applying catalog metadata and running SQL…')
 
   try {
     const { catalogName, catalogSnapshot } = parseCatalogEditor()
     const sql = parseSqlEditor()
 
-    statusText.textContent = 'Applying catalog and running SQL…'
     await ensureCatalog(catalogName, catalogSnapshot)
 
-    setStep('query', 'active', 'Executing SQL in DuckDB-Wasm')
+    setStep('query', 'active', 'Executing SQL')
     const result = await activeRuntime.catalog.connection.query(sql)
     const catalogDiagnostics = await activeRuntime.catalog.diagnostics()
 
-    renderResult(result)
+    const rowCount = renderResult(result)
     logOutput.textContent = JSON.stringify(
       {
         catalogName,
@@ -422,13 +448,18 @@ async function runDemo() {
       null,
       2,
     )
-    setStep('query', 'done', 'Query completed')
-    statusText.textContent = 'Query completed entirely in your browser.'
+    setStep('query', 'done', 'Completed')
+    setQueryMessage(
+      'success',
+      `Query completed successfully. ${rowCount.toLocaleString()} row${rowCount === 1 ? '' : 's'} returned.`,
+    )
   } catch (error) {
     console.error(error)
-    statusText.textContent = error instanceof Error ? error.message : String(error)
-    const active = [...steps.values()].find((element) => element.dataset.state === 'active')
-    if (active) active.dataset.state = 'error'
+    if (steps.get('catalog')?.dataset.state === 'active') {
+      setStep('catalog', 'error', 'Catalog update failed')
+    }
+    setStep('query', 'error', 'Failed')
+    setQueryMessage('error', error instanceof Error ? error.message : String(error))
     logOutput.textContent = error instanceof Error ? error.stack || error.message : String(error)
   } finally {
     runButton.disabled = false
@@ -440,7 +471,7 @@ async function runDemo() {
 runButton.addEventListener('click', () => void runDemo())
 resetButton.addEventListener('click', () => {
   void resetEditors().catch((error) => {
-    statusText.textContent = error instanceof Error ? error.message : String(error)
+    setQueryMessage('error', error instanceof Error ? error.message : String(error))
   })
 })
 window.addEventListener('pagehide', () => void cleanupRuntime())

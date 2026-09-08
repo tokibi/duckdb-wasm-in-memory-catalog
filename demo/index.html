@@ -78,119 +78,140 @@
         <div class="section-heading demo-heading">
           <div>
             <span>Live demo</span>
-            <h2 id="demo-title">Edit the catalog. Write SQL. Run it here.</h2>
+            <h2 id="demo-title">Configure the catalog. Run a query.</h2>
           </div>
-          <div class="demo-actions">
-            <button class="button secondary" id="reset-demo" type="button">Reset editors</button>
-          </div>
+          <button class="button secondary" id="reset-demo" type="button">Reset demo</button>
         </div>
 
-        <div class="demo-layout">
-          <div class="demo-sidebar">
-            <div class="panel steps-panel">
-              <div class="panel-title">Runtime</div>
-              <ol class="steps">
-                <li data-step="source" data-state="idle">
-                  <span class="step-dot"></span>
-                  <div><strong>Hosted demo file</strong><small data-step-detail>Waiting</small></div>
-                </li>
-                <li data-step="catalog" data-state="idle">
-                  <span class="step-dot"></span>
-                  <div><strong>In-Memory Catalog</strong><small data-step-detail>Waiting</small></div>
-                </li>
-              </ol>
+        <div class="setup-grid">
+          <section class="panel environment-card" aria-labelledby="environment-title">
+            <header class="component-header">
+              <div>
+                <span class="component-kicker">Environment</span>
+                <h3 id="environment-title">Runtime & hosted file</h3>
+                <p>Resources used by this browser session.</p>
+              </div>
+              <span class="status-badge" id="runtime-status" data-state="starting">Starting</span>
+            </header>
+
+            <div class="runtime-checks" aria-label="Runtime initialization status">
+              <div class="runtime-check" data-step="source" data-state="idle">
+                <span class="status-dot" aria-hidden="true"></span>
+                <div>
+                  <strong>Hosted demo file</strong>
+                  <small data-step-detail>Waiting</small>
+                </div>
+              </div>
+              <div class="runtime-check" data-step="catalog" data-state="idle">
+                <span class="status-dot" aria-hidden="true"></span>
+                <div>
+                  <strong>In-Memory Catalog</strong>
+                  <small data-step-detail>Waiting</small>
+                </div>
+              </div>
             </div>
 
-            <div class="panel fixture-panel">
-              <div class="panel-title">Hosted demo file</div>
-              <dl class="fixture-details">
-                <div>
-                  <dt>Path</dt>
-                  <dd><code>data/demo.parquet</code></dd>
-                </div>
-                <div>
-                  <dt>URL</dt>
-                  <dd><a id="fixture-url" href="./data/demo.parquet">Loading…</a></dd>
-                </div>
-                <div>
-                  <dt>Content SHA-256</dt>
-                  <dd><code class="fixture-hash" id="fixture-content-version">—</code></dd>
-                </div>
-                <div class="fixture-stats">
-                  <div>
-                    <dt>Rows</dt>
-                    <dd id="fixture-rows">—</dd>
-                  </div>
-                  <div>
-                    <dt>Size</dt>
-                    <dd id="fixture-bytes">—</dd>
-                  </div>
-                </div>
-                <div>
-                  <dt>Columns</dt>
-                  <dd class="fixture-columns" id="fixture-columns">—</dd>
-                </div>
-              </dl>
-            </div>
-          </div>
+            <div class="component-divider"></div>
 
-          <div class="panel editor-panel">
-            <div class="panel-title">Catalog</div>
-            <div class="editor-field compact-field">
+            <div class="fixture-header">
+              <div>
+                <span class="component-kicker">Hosted demo file</span>
+                <strong>data/demo.parquet</strong>
+              </div>
+              <span class="file-badge">Parquet</span>
+            </div>
+            <dl class="fixture-details">
+              <div>
+                <dt>URL</dt>
+                <dd><a id="fixture-url" href="./data/demo.parquet">Loading…</a></dd>
+              </div>
+              <div class="fixture-stats">
+                <div>
+                  <dt>Rows</dt>
+                  <dd id="fixture-rows">—</dd>
+                </div>
+                <div>
+                  <dt>Size</dt>
+                  <dd id="fixture-bytes">—</dd>
+                </div>
+              </div>
+              <div>
+                <dt>Columns</dt>
+                <dd class="fixture-columns" id="fixture-columns">—</dd>
+              </div>
+              <div>
+                <dt>Content SHA-256</dt>
+                <dd><code class="fixture-hash" id="fixture-content-version">—</code></dd>
+              </div>
+            </dl>
+          </section>
+
+          <section class="panel catalog-card" aria-labelledby="catalog-title">
+            <header class="component-header">
+              <div>
+                <span class="component-kicker">Catalog</span>
+                <h3 id="catalog-title">Published metadata</h3>
+                <p>Edit the catalog snapshot that DuckDB sees.</p>
+              </div>
+            </header>
+
+            <div class="editor-field catalog-name-field">
               <label for="catalog-name">Catalog name</label>
               <input class="editor-input" id="catalog-name" type="text" value="demo" spellcheck="false">
             </div>
 
-            <div class="editor-field">
+            <div class="editor-field catalog-json-field">
               <label for="catalog-editor">Catalog JSON</label>
               <textarea class="editor-textarea catalog-editor" id="catalog-editor" spellcheck="false" aria-label="Catalog JSON"></textarea>
             </div>
-          </div>
+          </section>
         </div>
 
-        <div class="panel query-panel">
-          <div class="query-header">
-            <div>
-              <div class="panel-title">Query</div>
-              <ol class="steps query-steps">
-                <li data-step="query" data-state="idle">
-                  <span class="step-dot"></span>
-                  <div><strong>DuckDB query</strong><small data-step-detail>Waiting</small></div>
-                </li>
-              </ol>
+        <section class="panel query-workspace" aria-labelledby="query-title">
+          <header class="query-toolbar">
+            <div class="query-heading">
+              <span class="component-kicker">Query</span>
+              <h3 id="query-title">DuckDB query</h3>
+              <div class="query-state" data-step="query" data-state="idle">
+                <span class="status-dot" aria-hidden="true"></span>
+                <span data-step-detail>Waiting for runtime</span>
+              </div>
             </div>
-            <button class="button primary" id="run-demo" type="button">Run SQL</button>
-          </div>
+            <button class="button primary run-button" id="run-demo" type="button">Run SQL</button>
+          </header>
 
-          <div class="editor-field query-editor-field">
-            <label for="sql-editor">SQL</label>
-            <textarea class="editor-textarea sql-editor" id="sql-editor" spellcheck="false" aria-label="SQL query"></textarea>
-          </div>
-
-          <div class="query-message" id="demo-status" aria-live="polite">
-            Starting DuckDB-Wasm runtime…
-          </div>
-
-          <div class="query-results">
-            <div class="panel-title split-title">
-              <span>Query result</span>
-              <span class="mono-label" id="result-summary">—</span>
+          <div class="query-body">
+            <div class="editor-field query-editor-field">
+              <label for="sql-editor">SQL</label>
+              <textarea class="editor-textarea sql-editor" id="sql-editor" spellcheck="false" aria-label="SQL query"></textarea>
             </div>
-            <div class="table-scroll">
-              <table>
-                <thead id="result-head"></thead>
-                <tbody id="result-body"></tbody>
-              </table>
-            </div>
-          </div>
-        </div>
 
-        <details class="panel details-panel">
-          <summary>Inspect runtime diagnostics</summary>
-          <div class="detail-grid">
-            <pre id="diagnostics">Diagnostics will appear here after the query.</pre>
+            <div class="query-feedback" id="query-message" data-kind="idle" role="status" aria-live="polite">
+              Waiting for the runtime to become ready.
+            </div>
+
+            <section class="result-surface" aria-labelledby="result-title">
+              <header class="result-header">
+                <div>
+                  <span class="component-kicker">Output</span>
+                  <h4 id="result-title">Query result</h4>
+                </div>
+                <span class="mono-label" id="result-summary">—</span>
+              </header>
+              <div class="table-scroll">
+                <table>
+                  <thead id="result-head"></thead>
+                  <tbody id="result-body"></tbody>
+                </table>
+              </div>
+            </section>
+
+            <details class="query-diagnostics">
+              <summary>Runtime diagnostics</summary>
+              <pre id="diagnostics">Diagnostics will appear here after the query.</pre>
+            </details>
           </div>
-        </details>
+        </section>
       </section>
     </main>
 
