@@ -1,0 +1,4 @@
+duckdb_commit=d1dc88f950d456d72493df452dabdcd13aa413dd
+duckdb_release=v1.4.3
+duckdb_wasm_npm=1.32.0
+emscripten=3.1.56

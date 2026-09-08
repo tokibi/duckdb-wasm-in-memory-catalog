@@ -1,0 +1,17 @@
+{
+  "name": "duckdb-wasm-in-memory-catalog",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/javascript/in-memory-catalog-controller.mjs",
+    "./worker": "./src/javascript/in-memory-catalog-worker.js",
+    "./metadata-store": "./src/javascript/in-memory-catalog-metadata-store.js",
+    "./worker-runtime": "./src/javascript/in-memory-catalog-worker-runtime.js",
+    "./common-worker-router": "./src/javascript/common-worker-router.js"
+  },
+  "scripts": {
+    "test": "node --test test/unit/*.test.mjs",
+    "build:wasm": "sh scripts/build-wasm.sh"
+  }
+}
