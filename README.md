@@ -4,9 +4,9 @@ Publish application-owned table metadata as a read-only DuckDB catalog in the br
 
 [**Live demo**](https://tokibi.github.io/duckdb-wasm-in-memory-catalog/) · [MIT License](LICENSE)
 
-The application supplies complete schema, table, column, and file URI metadata. A Dedicated Worker validates each published revision and exposes table descriptors to the `in_memory_catalog` Wasm extension on demand.
+The application supplies complete schema, table, column, scanner, and file URI metadata. A Dedicated Worker validates each published revision and exposes table descriptors to the `in_memory_catalog` Wasm extension on demand.
 
-File URIs are opaque to the Catalog. DuckDB-Wasm resolves and reads them through its configured filesystem when a query touches the corresponding table.
+Each table declares how its files should be scanned. File URIs only identify where those files are located; the Catalog does not infer a scanner from a filename, extension, or URI shape.
 
 ```mermaid
 flowchart LR
@@ -23,60 +23,87 @@ flowchart LR
   Controller -->|MessageChannel| Worker
   DuckDB --> Extension
   Extension -->|table lookup| Worker
-  Worker -->|columns and opaque file URIs| Extension
+  Worker -->|columns and file URIs| Extension
 ```
 
 ## Live demo
 
-The GitHub Pages demo publishes a small hosted fixture at `data/demo.parquet`. The browser inserts that same-origin HTTPS URL into the Catalog snapshot, then DuckDB-Wasm resolves and reads the file through its configured HTTP filesystem when SQL touches the table. The demo fixture happens to be Parquet; the Catalog contract itself is format-agnostic.
+The GitHub Pages demo publishes a small hosted fixture at `data/demo.parquet`. The browser inserts that same-origin HTTPS URL into the Catalog snapshot and explicitly declares the table scanner. DuckDB-Wasm then reads the file through its configured HTTP filesystem when SQL touches the table.
 
-The DuckDB-Wasm runtime and default Catalog start automatically when the page opens. The demo shows the hosted fixture URL, row count, size, and columns alongside the runtime state. The Catalog JSON contains the resolved Pages URL and fixture content hash directly, and both the Catalog JSON and SQL remain editable before running a query.
+The DuckDB-Wasm runtime and default Catalog start automatically when the page opens. The demo shows the hosted fixture URL, row count, size, and columns alongside the runtime state. The Catalog JSON contains the resolved Pages URL, scanner configuration, and fixture content hash directly, and both the Catalog JSON and SQL remain editable before running a query.
 
 ```text
 Catalog metadata
       │
-      │ files[].uri = https://tokibi.github.io/duckdb-wasm-in-memory-catalog/data/demo.parquet
-      ▼
-DuckDB-Wasm
-      │
-      │ configured filesystem
-      ▼
-GitHub Pages
+      ├─ scanner.type = parquet
+      └─ files[].uri = https://tokibi.github.io/duckdb-wasm-in-memory-catalog/data/demo.parquet
+                    │
+                    ▼
+                DuckDB-Wasm
+                    │
+                    │ configured filesystem
+                    ▼
+                GitHub Pages
 ```
 
 ## Snapshot contract
 
 Each publication contains a uint64 revision and a complete snapshot. A newer revision atomically replaces the current snapshot, the same revision with identical content is idempotent, and stale or conflicting revisions are rejected without changing the current state.
 
-Enumeration returns schema names, table names, and column definitions without copying file URIs into DuckDB-Wasm. Table lookup returns the URI descriptors for the referenced table only. Catalog mutation statements are rejected because the application remains the metadata authority.
+`format_version: 2` requires every table to declare a scanner explicitly. The Catalog never chooses a scanner from `files[].uri`.
+
+Enumeration returns schema names, table names, and column definitions without copying file URIs into DuckDB-Wasm. Table lookup returns the file descriptors for the referenced table only. Catalog mutation statements are rejected because the application remains the metadata authority.
 
 Example snapshot:
 
 ```js
 {
-  format_version: 1,
+  format_version: 2,
   schemas: [{
     name: 'analytics',
     tables: [{
       name: 'events',
       snapshot: 'events-r42',
+      scanner: {
+        type: 'parquet',
+        options: {},
+      },
       columns: [
         { name: 'id', type: 'BIGINT', nullable: false },
         { name: 'category', type: 'VARCHAR', nullable: true },
       ],
       files: [
-        { uri: 'https://example.test/events-r42' },
+        { uri: 'https://example.test/files/events-r42' },
       ],
     }],
   }],
 }
 ```
 
-## File contract
+## Scanner and file contract
 
-The Catalog treats `files[].uri` as an opaque file identifier and does not encode a file format in the snapshot contract. Format-specific scanning belongs to the DuckDB integration layer.
+A table separates three concerns:
 
-The current scanner implementation uses DuckDB's Parquet reader and validates the physical schema against the published column count, order, names, and types. Other scanners, such as CSV, can be added without changing the Catalog snapshot or file URI contract.
+```text
+columns      how the table appears to DuckDB
+scanner      how the files are interpreted
+files[].uri  where the files are located
+```
+
+The scanner is table-level because all files that form one table are expected to share the same read configuration. `scanner.options` is part of the contract so scanner-specific settings can be added without moving format information into each file descriptor.
+
+The current implementation supports:
+
+```js
+scanner: {
+  type: 'parquet',
+  options: {},
+}
+```
+
+Non-empty Parquet options and other scanner types are currently rejected. CSV and other scanners can be added by defining their supported options and scan implementation while keeping the same table/file structure.
+
+The current Parquet scanner validates the physical schema against the published column count, order, names, and types.
 
 ## Runtime ownership
 

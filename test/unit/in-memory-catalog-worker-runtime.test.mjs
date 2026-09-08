@@ -7,14 +7,15 @@ await import('../../src/javascript/in-memory-catalog-worker-runtime.js')
 const { InMemoryCatalogMetadataStore } = globalThis.DuckDBInMemoryCatalogMetadata
 const { createInMemoryCatalogWorkerRuntime } = globalThis.DuckDBInMemoryCatalogWorkerRuntime
 
-function snapshot(uri = 'https://example.test/table.parquet') {
+function snapshot(uri = 'https://example.test/table') {
   return {
-    format_version: 1,
+    format_version: 2,
     schemas: [{
       name: 'main',
       tables: [{
         name: 'table1',
         snapshot: 'snapshot-1',
+        scanner: { type: 'parquet', options: {} },
         columns: [{ name: 'id', type: 'BIGINT', nullable: false }],
         files: [{ uri }],
       }],
@@ -43,7 +44,7 @@ class FakePort {
 }
 
 describe('In-Memory Catalog Worker runtime', () => {
-  it('opens a dedicated session and exposes URI-only bridge descriptors', async () => {
+  it('opens a dedicated session and exposes file descriptors to the current scanner implementation', async () => {
     const store = new InMemoryCatalogMetadataStore()
     const runtime = createInMemoryCatalogWorkerRuntime(store)
     const port = new FakePort()
@@ -72,7 +73,7 @@ describe('In-Memory Catalog Worker runtime', () => {
     assert.equal(runtime.bridge.currentRevision('workspace'), '1')
     assert.deepEqual(
       JSON.parse(runtime.bridge.lookupTable('workspace', '1', 'main', 'table1')).files,
-      [{ uri: 'https://example.test/table.parquet' }],
+      [{ uri: 'https://example.test/table' }],
     )
     await port.dispatch({
       type: 'IN_MEMORY_CATALOG_GET_DIAGNOSTICS',

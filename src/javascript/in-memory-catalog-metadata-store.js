@@ -9,6 +9,7 @@
     'VARCHAR',
     'DATE', 'TIMESTAMP', 'TIMESTAMP_TZ',
   ])
+  const SUPPORTED_SCANNERS = new Set(['parquet'])
   const DECIMAL_REVISION_PATTERN = /^(0|[1-9][0-9]*)$/
   const MAX_UINT64 = (1n << 64n) - 1n
 
@@ -155,10 +156,10 @@
 
   function normalizeSnapshot(input) {
     if (!isRecord(input)) invalid('snapshot must be an object')
-    if (input.format_version !== 1) {
+    if (input.format_version !== 2) {
       throw new InMemoryCatalogError(
         'RC_METADATA_VERSION',
-        'Catalog snapshot format_version must be 1',
+        'Catalog snapshot format_version must be 2',
       )
     }
     if (!Array.isArray(input.schemas) || input.schemas.length === 0) {
@@ -192,7 +193,7 @@
     })
 
     return {
-      snapshot: deepFreeze({ format_version: 1, schemas: normalizedSchemas }),
+      snapshot: deepFreeze({ format_version: 2, schemas: normalizedSchemas }),
       schemas: schemaIndex,
     }
   }
@@ -201,6 +202,7 @@
     if (!isRecord(input)) invalid(`${path} must be an object`)
     const name = uniqueName(input.name, tableNames, `${path}.name`)
     const snapshot = requireName(input.snapshot, `${path}.snapshot`)
+    const scanner = normalizeScanner(input.scanner, `${path}.scanner`)
     if (!Array.isArray(input.columns) || input.columns.length === 0) {
       invalid(`${path}.columns must contain at least one column`)
     }
@@ -232,7 +234,27 @@
       return deepFreeze({ uri })
     })
 
-    return deepFreeze({ name, snapshot, columns, files })
+    return deepFreeze({ name, snapshot, scanner, columns, files })
+  }
+
+  function normalizeScanner(input, path) {
+    if (!isRecord(input) || !hasExactKeys(input, ['type', 'options'])) {
+      invalid(`${path} must contain type and options`)
+    }
+    const type = requireName(input.type, `${path}.type`)
+    if (!SUPPORTED_SCANNERS.has(type)) {
+      throw new InMemoryCatalogError(
+        'RC_SCANNER_UNSUPPORTED',
+        `Scanner type ${type} is not supported`,
+      )
+    }
+    if (!isRecord(input.options)) {
+      invalid(`${path}.options must be an object`)
+    }
+    if (type === 'parquet' && Object.keys(input.options).length !== 0) {
+      invalid(`${path}.options must be empty for parquet`)
+    }
+    return deepFreeze({ type, options: {} })
   }
 
   function parsePublicRevision(value) {

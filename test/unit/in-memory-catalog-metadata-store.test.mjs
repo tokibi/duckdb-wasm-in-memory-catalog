@@ -8,14 +8,15 @@ const {
   InMemoryCatalogMetadataStore,
 } = globalThis.DuckDBInMemoryCatalogMetadata
 
-function snapshot(uri = 'https://example.test/table.parquet') {
+function snapshot(uri = 'https://example.test/table') {
   return {
-    format_version: 1,
+    format_version: 2,
     schemas: [{
       name: 'main',
       tables: [{
         name: 'table1',
         snapshot: 'snapshot-1',
+        scanner: { type: 'parquet', options: {} },
         columns: [{ name: 'id', type: 'BIGINT', nullable: false }],
         files: [{ uri }],
       }],
@@ -32,7 +33,7 @@ async function expectCode(operation, code) {
 }
 
 describe('InMemoryCatalogMetadataStore', () => {
-  it('publishes URI-only metadata and keeps enumeration descriptors lightweight', async () => {
+  it('publishes scanner and URI metadata while keeping enumeration descriptors lightweight', async () => {
     const store = new InMemoryCatalogMetadataStore()
     const session = store.openWorkspaceSession('workspace')
 
@@ -44,10 +45,50 @@ describe('InMemoryCatalogMetadataStore', () => {
       name: 'table1',
       columns: [{ name: 'id', type: 'BIGINT', nullable: false }],
     }])
-    assert.deepEqual(store.lookupTable('workspace', '1', 'main', 'table1').files, [
-      { uri: 'https://example.test/table.parquet' },
-    ])
-    assert.doesNotMatch(JSON.stringify(store.listTables('workspace', '1', 'main')), /uri|files/)
+    const table = store.lookupTable('workspace', '1', 'main', 'table1')
+    assert.deepEqual(table.scanner, { type: 'parquet', options: {} })
+    assert.deepEqual(table.files, [{ uri: 'https://example.test/table' }])
+    assert.doesNotMatch(JSON.stringify(store.listTables('workspace', '1', 'main')), /uri|files|scanner/)
+  })
+
+  it('requires an explicit supported scanner in format version 2', async () => {
+    const store = new InMemoryCatalogMetadataStore()
+    const session = store.openWorkspaceSession('workspace')
+
+    const missing = snapshot()
+    delete missing.schemas[0].tables[0].scanner
+    await expectCode(
+      () => session.replaceCatalogSnapshot(1n, missing),
+      'RC_METADATA_INVALID',
+    )
+
+    const unsupported = snapshot()
+    unsupported.schemas[0].tables[0].scanner.type = 'csv'
+    await expectCode(
+      () => session.replaceCatalogSnapshot(1n, unsupported),
+      'RC_SCANNER_UNSUPPORTED',
+    )
+
+    const options = snapshot()
+    options.schemas[0].tables[0].scanner.options = { hive_partitioning: true }
+    await expectCode(
+      () => session.replaceCatalogSnapshot(1n, options),
+      'RC_METADATA_INVALID',
+    )
+
+    assert.equal(store.currentRevision('workspace'), undefined)
+  })
+
+  it('rejects the previous snapshot format instead of choosing a scanner implicitly', async () => {
+    const store = new InMemoryCatalogMetadataStore()
+    const session = store.openWorkspaceSession('workspace')
+    const legacy = snapshot()
+    legacy.format_version = 1
+
+    await expectCode(
+      () => session.replaceCatalogSnapshot(1n, legacy),
+      'RC_METADATA_VERSION',
+    )
   })
 
   it('enumerates 100,000 tables without full lookup or URI transfer', async () => {
@@ -73,7 +114,7 @@ describe('InMemoryCatalogMetadataStore', () => {
     })
   })
 
-  it('rejects legacy object metadata and duplicate URIs atomically', async () => {
+  it('rejects extra file metadata and duplicate URIs atomically', async () => {
     const store = new InMemoryCatalogMetadataStore()
     const session = store.openWorkspaceSession('workspace')
     const legacy = snapshot()
@@ -88,7 +129,7 @@ describe('InMemoryCatalogMetadataStore', () => {
 
     const duplicate = snapshot()
     duplicate.schemas[0].tables[0].files.push({
-      uri: 'https://example.test/table.parquet',
+      uri: 'https://example.test/table',
     })
     await expectCode(
       () => session.replaceCatalogSnapshot(1n, duplicate),

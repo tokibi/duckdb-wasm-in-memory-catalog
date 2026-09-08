@@ -38,7 +38,7 @@
         <h1>Publish metadata.<br>Query remote files.</h1>
         <p class="hero-copy">
           Application-owned schema and file metadata become an ordinary read-only DuckDB catalog.
-          This demo reads a hosted file from GitHub Pages directly over HTTPS.
+          Each table explicitly declares how its files should be scanned.
         </p>
         <div class="hero-actions">
           <a class="button primary" href="#demo">Try the demo</a>
@@ -47,7 +47,7 @@
         <div class="badges" aria-label="Project highlights">
           <span>DuckDB-Wasm</span>
           <span>Read-only catalog</span>
-          <span>Opaque file URIs</span>
+          <span>Explicit scanners</span>
           <span>Direct HTTPS</span>
         </div>
       </section>
@@ -55,21 +55,21 @@
       <section class="architecture" aria-labelledby="architecture-title">
         <div class="section-heading">
           <span>Architecture</span>
-          <h2 id="architecture-title">The catalog only describes files. DuckDB reads them.</h2>
+          <h2 id="architecture-title">The catalog describes tables. DuckDB reads their files.</h2>
         </div>
         <div class="flow-grid two-up">
           <article class="flow-card">
             <span class="flow-index">01</span>
             <h3>In-Memory Catalog</h3>
-            <p>The host publishes schemas, tables, columns, and ordinary HTTP(S) file URIs.</p>
+            <p>The host publishes schemas, tables, columns, scanner settings, and file URIs.</p>
             <code>metadata → read-only catalog</code>
           </article>
           <div class="flow-arrow" aria-hidden="true">→</div>
           <article class="flow-card accent">
             <span class="flow-index">02</span>
             <h3>DuckDB-Wasm</h3>
-            <p>When SQL touches a table, DuckDB resolves and reads its file through the configured filesystem.</p>
-            <code>SQL → file access</code>
+            <p>When SQL touches a table, DuckDB reads the declared files using that table's scanner configuration.</p>
+            <code>SQL → scanner → file access</code>
           </article>
         </div>
       </section>
@@ -151,7 +151,7 @@
               <div>
                 <span class="component-kicker">Catalog</span>
                 <h3 id="catalog-title">Published metadata</h3>
-                <p>Edit the catalog snapshot that DuckDB sees.</p>
+                <p>Edit the table schema, scanner configuration, and file references that DuckDB sees.</p>
               </div>
             </header>
 

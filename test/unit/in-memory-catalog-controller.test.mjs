@@ -11,14 +11,15 @@ const {
 const { InMemoryCatalogMetadataStore } = globalThis.DuckDBInMemoryCatalogMetadata
 const { createInMemoryCatalogWorkerRuntime } = globalThis.DuckDBInMemoryCatalogWorkerRuntime
 
-function snapshot(uri = 'https://example.test/table.parquet') {
+function snapshot(uri = 'https://example.test/table') {
   return {
-    format_version: 1,
+    format_version: 2,
     schemas: [{
       name: 'main',
       tables: [{
         name: 'table1',
         snapshot: 'snapshot-1',
+        scanner: { type: 'parquet', options: {} },
         columns: [{ name: 'id', type: 'BIGINT', nullable: false }],
         files: [{ uri }],
       }],
@@ -57,7 +58,7 @@ describe('InMemoryCatalogController', () => {
       snapshot(),
     )
 
-    await controller.publishSnapshot(2n, snapshot('https://example.test/revision-2.parquet'))
+    await controller.publishSnapshot(2n, snapshot('https://example.test/revision-2'))
     assert.equal((await controller.diagnostics()).active_workspace_session_count, 1)
     const firstClose = controller.close()
     const secondClose = controller.close()

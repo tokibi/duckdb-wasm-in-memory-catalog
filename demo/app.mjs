@@ -42,9 +42,9 @@ function loadMetadata() {
   return metadataPromise
 }
 
-function defaultCatalog(metadata, parquetUrl) {
+function defaultCatalog(metadata, fileUrl) {
   return {
-    format_version: 1,
+    format_version: 2,
     schemas: [
       {
         name: 'analytics',
@@ -52,8 +52,12 @@ function defaultCatalog(metadata, parquetUrl) {
           {
             name: 'nation',
             snapshot: metadata.contentVersion,
+            scanner: {
+              type: 'parquet',
+              options: {},
+            },
             columns: metadata.columns,
-            files: [{ uri: parquetUrl }],
+            files: [{ uri: fileUrl }],
           },
         ],
       },
@@ -113,9 +117,9 @@ function resetResultView() {
   logOutput.textContent = 'Diagnostics will appear here after the query.'
 }
 
-function populateFixtureInfo(metadata, parquetUrl) {
-  fixtureUrlValue.href = parquetUrl
-  fixtureUrlValue.textContent = parquetUrl
+function populateFixtureInfo(metadata, fileUrl) {
+  fixtureUrlValue.href = fileUrl
+  fixtureUrlValue.textContent = fileUrl
   fixtureContentVersionValue.textContent = metadata.contentVersion
   fixtureRowsValue.textContent = Number(metadata.rows).toLocaleString()
   fixtureBytesValue.textContent = formatBytes(Number(metadata.bytes))
@@ -124,9 +128,9 @@ function populateFixtureInfo(metadata, parquetUrl) {
 
 async function resetEditors({ announce = true } = {}) {
   const metadata = await loadMetadata()
-  const parquetUrl = new URL('./data/demo.parquet', rootUrl).href
+  const fileUrl = new URL('./data/demo.parquet', rootUrl).href
   catalogNameInput.value = 'demo'
-  catalogEditor.value = `${JSON.stringify(defaultCatalog(metadata, parquetUrl), null, 2)}\n`
+  catalogEditor.value = `${JSON.stringify(defaultCatalog(metadata, fileUrl), null, 2)}\n`
   sqlEditor.value = defaultSql
   resetResultView()
   if (announce) {
@@ -218,15 +222,15 @@ function renderResult(result) {
   return rows.length
 }
 
-async function probeParquet(parquetUrl) {
-  const response = await fetch(parquetUrl, {
+async function probeHostedFile(fileUrl) {
+  const response = await fetch(fileUrl, {
     cache: 'no-store',
     headers: { Range: 'bytes=0-0' },
   })
   const rangeSupported = response.status === 206
   const contentRange = response.headers.get('content-range')
   await response.body?.cancel()
-  if (!response.ok) throw new Error(`Parquet source request failed: HTTP ${response.status}`)
+  if (!response.ok) throw new Error(`Hosted file request failed: HTTP ${response.status}`)
   return {
     status: response.status,
     rangeSupported,
@@ -332,12 +336,12 @@ async function startRuntime() {
 
   try {
     const metadata = await loadMetadata()
-    const parquetUrl = new URL('./data/demo.parquet', rootUrl).href
-    populateFixtureInfo(metadata, parquetUrl)
+    const fileUrl = new URL('./data/demo.parquet', rootUrl).href
+    populateFixtureInfo(metadata, fileUrl)
     await resetEditors({ announce: false })
 
-    setStep('source', 'active', 'Checking the Pages-hosted Parquet file')
-    const sourceProbe = await probeParquet(parquetUrl)
+    setStep('source', 'active', 'Checking the Pages-hosted demo file')
+    const sourceProbe = await probeHostedFile(fileUrl)
     setStep(
       'source',
       'done',
@@ -375,7 +379,7 @@ async function startRuntime() {
       database,
       ...initializedCatalog,
       metadata,
-      parquetUrl,
+      fileUrl,
       sourceProbe,
     }
     worker = database = catalog = null
@@ -437,7 +441,7 @@ async function runDemo() {
         catalog: catalogSnapshot,
         sql,
         hostedFile: {
-          url: activeRuntime.parquetUrl,
+          url: activeRuntime.fileUrl,
           contentVersion: activeRuntime.metadata.contentVersion,
           rows: activeRuntime.metadata.rows,
           bytes: activeRuntime.metadata.bytes,
