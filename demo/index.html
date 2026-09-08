@@ -86,26 +86,56 @@
           </div>
         </div>
         <p class="demo-intro" id="demo-status" aria-live="polite">
-          The default table points to a Parquet file published by this GitHub Pages site and is read directly over HTTPS.
+          Starting DuckDB-Wasm runtime…
         </p>
 
         <div class="demo-layout">
-          <div class="panel steps-panel">
-            <div class="panel-title">Runtime</div>
-            <ol class="steps">
-              <li data-step="source" data-state="idle">
-                <span class="step-dot"></span>
-                <div><strong>GitHub Pages Parquet</strong><small data-step-detail>Waiting</small></div>
-              </li>
-              <li data-step="catalog" data-state="idle">
-                <span class="step-dot"></span>
-                <div><strong>In-Memory Catalog</strong><small data-step-detail>Waiting</small></div>
-              </li>
-              <li data-step="query" data-state="idle">
-                <span class="step-dot"></span>
-                <div><strong>DuckDB query</strong><small data-step-detail>Waiting</small></div>
-              </li>
-            </ol>
+          <div class="demo-sidebar">
+            <div class="panel steps-panel">
+              <div class="panel-title">Runtime</div>
+              <ol class="steps">
+                <li data-step="source" data-state="idle">
+                  <span class="step-dot"></span>
+                  <div><strong>Hosted demo file</strong><small data-step-detail>Waiting</small></div>
+                </li>
+                <li data-step="catalog" data-state="idle">
+                  <span class="step-dot"></span>
+                  <div><strong>In-Memory Catalog</strong><small data-step-detail>Waiting</small></div>
+                </li>
+                <li data-step="query" data-state="idle">
+                  <span class="step-dot"></span>
+                  <div><strong>DuckDB query</strong><small data-step-detail>Waiting</small></div>
+                </li>
+              </ol>
+            </div>
+
+            <div class="panel fixture-panel">
+              <div class="panel-title">Hosted demo file</div>
+              <dl class="fixture-details">
+                <div>
+                  <dt>Path</dt>
+                  <dd><code>data/demo.parquet</code></dd>
+                </div>
+                <div>
+                  <dt>URL</dt>
+                  <dd><a id="fixture-url" href="./data/demo.parquet">Loading…</a></dd>
+                </div>
+                <div class="fixture-stats">
+                  <div>
+                    <dt>Rows</dt>
+                    <dd id="fixture-rows">—</dd>
+                  </div>
+                  <div>
+                    <dt>Size</dt>
+                    <dd id="fixture-bytes">—</dd>
+                  </div>
+                </div>
+                <div>
+                  <dt>Columns</dt>
+                  <dd class="fixture-columns" id="fixture-columns">—</dd>
+                </div>
+              </dl>
+            </div>
           </div>
 
           <div class="panel editor-panel">
@@ -115,10 +145,7 @@
             </div>
 
             <div class="editor-field">
-              <div class="editor-label-row">
-                <label for="catalog-editor">Catalog JSON</label>
-                <span><code>$DEMO_FILE</code> resolves to this Pages site's Parquet HTTPS URL</span>
-              </div>
+              <label for="catalog-editor">Catalog JSON</label>
               <textarea class="editor-textarea catalog-editor" id="catalog-editor" spellcheck="false" aria-label="Catalog JSON"></textarea>
             </div>
 
@@ -127,12 +154,6 @@
               <textarea class="editor-textarea sql-editor" id="sql-editor" spellcheck="false" aria-label="SQL query"></textarea>
             </div>
           </div>
-        </div>
-
-        <div class="metrics" aria-label="Demo metrics">
-          <article><span>Hosted fixture rows</span><strong id="metric-rows">—</strong></article>
-          <article><span>Parquet size</span><strong id="metric-bytes">—</strong></article>
-          <article><span>Transport</span><strong id="metric-transport">HTTPS</strong></article>
         </div>
 
         <div class="panel results-panel">
@@ -149,12 +170,8 @@
         </div>
 
         <details class="panel details-panel">
-          <summary>Inspect the resolved Parquet URL and query inputs</summary>
+          <summary>Inspect runtime diagnostics</summary>
           <div class="detail-grid">
-            <div>
-              <span class="detail-label">Parquet URL</span>
-              <code id="parquet-uri">—</code>
-            </div>
             <pre id="diagnostics">Diagnostics will appear here after the query.</pre>
           </div>
         </details>
