@@ -13,7 +13,7 @@ async function copy(source, destination) {
 await rm(outputRoot, { recursive: true, force: true })
 await mkdir(outputRoot, { recursive: true })
 
-for (const file of ['index.html', 'styles.css', 'app.mjs']) {
+for (const file of ['index.html', 'styles.css', 'app.mjs', 'query-examples.mjs']) {
   await copy(`demo/${file}`, file)
 }
 await writeFile(resolve(outputRoot, '.nojekyll'), '')
