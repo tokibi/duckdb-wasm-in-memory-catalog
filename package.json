@@ -12,6 +12,11 @@
   },
   "scripts": {
     "test": "node --test test/unit/*.test.mjs",
-    "build:wasm": "sh scripts/build-wasm.sh"
+    "build:wasm": "sh scripts/build-wasm.sh",
+    "build:pages": "node scripts/build-pages.mjs",
+    "serve:pages": "node scripts/serve-pages.mjs"
+  },
+  "dependencies": {
+    "@duckdb/duckdb-wasm": "1.32.0"
   }
 }

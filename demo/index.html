@@ -1,0 +1,171 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta
+      name="description"
+      content="Live browser demo of DuckDB-Wasm In-Memory Catalog reading Parquet directly from GitHub Pages over HTTPS."
+    >
+    <title>DuckDB-Wasm In-Memory Catalog</title>
+    <link rel="icon" href="data:,">
+    <link rel="stylesheet" href="./styles.css">
+    <script type="importmap">
+      {
+        "imports": {
+          "apache-arrow": "./vendor/apache-arrow/Arrow.mjs",
+          "flatbuffers": "./vendor/flatbuffers/flatbuffers.js",
+          "tslib": "./vendor/tslib/tslib.es6.mjs"
+        }
+      }
+    </script>
+  </head>
+  <body>
+    <header class="site-header">
+      <a class="brand" href="./" aria-label="DuckDB-Wasm In-Memory Catalog home">
+        <span class="brand-mark">D</span>
+        <span>DuckDB-Wasm In-Memory Catalog</span>
+      </a>
+      <nav>
+        <a href="https://github.com/tokibi/duckdb-wasm-in-memory-catalog">GitHub</a>
+        <a href="#demo">Live demo</a>
+      </nav>
+    </header>
+
+    <main>
+      <section class="hero">
+        <div class="eyebrow">Browser-only metadata catalog</div>
+        <h1>Publish metadata.<br>Query remote Parquet.</h1>
+        <p class="hero-copy">
+          Application-owned schema and file metadata become an ordinary read-only DuckDB catalog.
+          This demo reads a Parquet file hosted by GitHub Pages directly over HTTPS — no Service Worker and no storage gateway.
+        </p>
+        <div class="hero-actions">
+          <a class="button primary" href="#demo">Try the demo</a>
+          <a class="button secondary" href="https://github.com/tokibi/duckdb-wasm-in-memory-catalog">View source</a>
+        </div>
+        <div class="badges" aria-label="Project highlights">
+          <span>DuckDB-Wasm</span>
+          <span>Read-only catalog</span>
+          <span>Direct HTTPS</span>
+          <span>Parquet</span>
+        </div>
+      </section>
+
+      <section class="architecture" aria-labelledby="architecture-title">
+        <div class="section-heading">
+          <span>Architecture</span>
+          <h2 id="architecture-title">The catalog only describes files. DuckDB reads them.</h2>
+        </div>
+        <div class="flow-grid two-up">
+          <article class="flow-card">
+            <span class="flow-index">01</span>
+            <h3>In-Memory Catalog</h3>
+            <p>The host publishes schemas, tables, columns, and ordinary HTTP(S) file URIs.</p>
+            <code>metadata → read-only catalog</code>
+          </article>
+          <div class="flow-arrow" aria-hidden="true">→</div>
+          <article class="flow-card accent">
+            <span class="flow-index">02</span>
+            <h3>DuckDB-Wasm</h3>
+            <p>When SQL touches a table, DuckDB reads its Parquet file directly from GitHub Pages.</p>
+            <code>SQL → HTTPS Range GET</code>
+          </article>
+        </div>
+      </section>
+
+      <section class="demo-section" id="demo" aria-labelledby="demo-title">
+        <div class="section-heading demo-heading">
+          <div>
+            <span>Live demo</span>
+            <h2 id="demo-title">Edit the catalog. Write SQL. Run it here.</h2>
+          </div>
+          <div class="demo-actions">
+            <button class="button secondary" id="reset-demo" type="button">Reset editors</button>
+            <button class="button primary" id="run-demo" type="button">Run SQL</button>
+          </div>
+        </div>
+        <p class="demo-intro" id="demo-status" aria-live="polite">
+          The default table points to a Parquet file published by this GitHub Pages site and is read directly over HTTPS.
+        </p>
+
+        <div class="demo-layout">
+          <div class="panel steps-panel">
+            <div class="panel-title">Runtime</div>
+            <ol class="steps">
+              <li data-step="source" data-state="idle">
+                <span class="step-dot"></span>
+                <div><strong>GitHub Pages Parquet</strong><small data-step-detail>Waiting</small></div>
+              </li>
+              <li data-step="catalog" data-state="idle">
+                <span class="step-dot"></span>
+                <div><strong>In-Memory Catalog</strong><small data-step-detail>Waiting</small></div>
+              </li>
+              <li data-step="query" data-state="idle">
+                <span class="step-dot"></span>
+                <div><strong>DuckDB query</strong><small data-step-detail>Waiting</small></div>
+              </li>
+            </ol>
+          </div>
+
+          <div class="panel editor-panel">
+            <div class="editor-field compact-field">
+              <label for="catalog-name">Catalog name</label>
+              <input class="editor-input" id="catalog-name" type="text" value="demo" spellcheck="false">
+            </div>
+
+            <div class="editor-field">
+              <div class="editor-label-row">
+                <label for="catalog-editor">Catalog JSON</label>
+                <span><code>$DEMO_FILE</code> resolves to this Pages site's Parquet HTTPS URL</span>
+              </div>
+              <textarea class="editor-textarea catalog-editor" id="catalog-editor" spellcheck="false" aria-label="Catalog JSON"></textarea>
+            </div>
+
+            <div class="editor-field">
+              <label for="sql-editor">SQL</label>
+              <textarea class="editor-textarea sql-editor" id="sql-editor" spellcheck="false" aria-label="SQL query"></textarea>
+            </div>
+          </div>
+        </div>
+
+        <div class="metrics" aria-label="Demo metrics">
+          <article><span>Hosted fixture rows</span><strong id="metric-rows">—</strong></article>
+          <article><span>Parquet size</span><strong id="metric-bytes">—</strong></article>
+          <article><span>Transport</span><strong id="metric-transport">HTTPS</strong></article>
+        </div>
+
+        <div class="panel results-panel">
+          <div class="panel-title split-title">
+            <span>Query result</span>
+            <span class="mono-label" id="result-summary">—</span>
+          </div>
+          <div class="table-scroll">
+            <table>
+              <thead id="result-head"></thead>
+              <tbody id="result-body"></tbody>
+            </table>
+          </div>
+        </div>
+
+        <details class="panel details-panel">
+          <summary>Inspect the resolved Parquet URL and query inputs</summary>
+          <div class="detail-grid">
+            <div>
+              <span class="detail-label">Parquet URL</span>
+              <code id="parquet-uri">—</code>
+            </div>
+            <pre id="diagnostics">Diagnostics will appear here after the query.</pre>
+          </div>
+        </details>
+      </section>
+    </main>
+
+    <footer>
+      <span>MIT licensed.</span>
+      <a href="https://github.com/tokibi/duckdb-wasm-in-memory-catalog">Source and documentation</a>
+    </footer>
+
+    <script type="module" src="./app.mjs"></script>
+  </body>
+</html>
