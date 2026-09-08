@@ -17,7 +17,9 @@ for (const button of document.querySelectorAll('[data-query-example]')) {
     sqlEditor.value = sql
     sqlEditor.focus()
 
-    if (queryStep && queryStep.dataset.state !== 'error') {
+    if (queryStep?.dataset.state === 'error') return
+
+    if (queryStep) {
       queryStep.dataset.state = 'idle'
       const detail = queryStep.querySelector('[data-step-detail]')
       if (detail) detail.textContent = 'Ready'
