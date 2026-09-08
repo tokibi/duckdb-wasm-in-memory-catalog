@@ -124,6 +124,7 @@ h1 {
 .fixture-details dd { margin: 0; font-size: 13px; }
 .fixture-details code { font-size: 12px; }
 .fixture-details a { display: block; font: 12px/1.55 "SFMono-Regular", Consolas, "Liberation Mono", monospace; overflow-wrap: anywhere; }
+.fixture-hash { display: block; overflow-wrap: anywhere; }
 .fixture-stats { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
 .fixture-stats > div { padding: 12px; border: 1px solid var(--line); border-radius: 10px; background: var(--surface-soft); }
 .fixture-stats dd { font-size: 20px; font-weight: 750; letter-spacing: -0.03em; }
