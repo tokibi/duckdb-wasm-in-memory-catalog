@@ -6,7 +6,7 @@ Publish application-owned table metadata as a read-only DuckDB catalog in the br
 
 The application supplies complete schema, table, column, and file URI metadata. A Dedicated Worker validates each published revision and exposes table descriptors to the `in_memory_catalog` Wasm extension on demand.
 
-File URIs are opaque to this component. It does not resolve provider locators, manage credentials, fetch remote objects, or cache file contents. Those responsibilities can be supplied by Browser Remote File Gateway or any ordinary HTTP(S) server without changing the Catalog contract.
+File URIs are opaque to the Catalog. DuckDB-Wasm resolves and reads them through its configured filesystem when a query touches the corresponding table.
 
 ```mermaid
 flowchart LR
@@ -28,13 +28,9 @@ flowchart LR
 
 ## Live demo
 
-The GitHub Pages demo shows the Catalog without Browser Remote File Gateway or any Service Worker.
-
-The Pages build publishes a generated Parquet fixture at `data/demo.parquet`. The browser inserts that same-origin HTTPS URL into the Catalog snapshot, then DuckDB-Wasm reads the Parquet file through its normal HTTP filesystem when SQL touches the table.
+The GitHub Pages demo publishes a generated Parquet fixture at `data/demo.parquet`. The browser inserts that same-origin HTTPS URL into the Catalog snapshot, then DuckDB-Wasm reads the Parquet file through its normal HTTP filesystem when SQL touches the table.
 
 The demo lets you edit both the Catalog JSON and SQL before running the query. `$DEMO_FILE` resolves to the Pages-hosted Parquet URL and `$DEMO_CONTENT_VERSION` resolves to the generated fixture hash.
-
-This makes the transport boundary explicit:
 
 ```text
 Catalog metadata
@@ -43,12 +39,10 @@ Catalog metadata
       ▼
 DuckDB-Wasm
       │
-      │ ordinary HTTPS / HTTP Range
+      │ HTTPS / HTTP Range
       ▼
 GitHub Pages
 ```
-
-No Service Worker or Remote File Gateway is involved.
 
 ## Snapshot contract
 
@@ -82,7 +76,7 @@ Example snapshot:
 
 The current scan implementation loads DuckDB's Parquet dependency and validates each Parquet file against the published column count, order, names, and types.
 
-Parquet is a consumer constraint of the current Catalog integration, not part of the file URI or remote-storage contract.
+Parquet is a consumer constraint of the current Catalog integration, not part of the file URI contract.
 
 ## Runtime ownership
 

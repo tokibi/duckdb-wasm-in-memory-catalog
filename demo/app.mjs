@@ -322,7 +322,6 @@ async function runDemo() {
         sourceProbe,
         sourceBytes: metadata.bytes,
         catalogDiagnostics,
-        serviceWorker: 'not used',
       },
       null,
       2,
