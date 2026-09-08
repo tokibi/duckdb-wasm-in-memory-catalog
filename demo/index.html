@@ -181,6 +181,38 @@
           </header>
 
           <div class="query-body">
+            <section class="query-examples" aria-labelledby="query-examples-title">
+              <div class="query-examples-header">
+                <div>
+                  <span class="component-kicker">Examples</span>
+                  <h4 id="query-examples-title">Load a query</h4>
+                </div>
+                <p>Click an example to replace the SQL editor contents.</p>
+              </div>
+              <div class="query-example-grid">
+                <button class="query-example" type="button" data-query-example="metadata" data-query-label="Table metadata">
+                  <strong>Table metadata</strong>
+                  <span>Inspect columns and types without scanning the Parquet rows.</span>
+                  <code>DESCRIBE demo.analytics.nation;</code>
+                </button>
+                <button class="query-example" type="button" data-query-example="tables" data-query-label="List tables">
+                  <strong>List tables</strong>
+                  <span>Enumerate tables in the current Catalog schema.</span>
+                  <code>SHOW TABLES;</code>
+                </button>
+                <button class="query-example" type="button" data-query-example="rows" data-query-label="Preview rows">
+                  <strong>Preview rows</strong>
+                  <span>Read a small sample from the hosted Parquet file.</span>
+                  <code>SELECT * … LIMIT 10;</code>
+                </button>
+                <button class="query-example" type="button" data-query-example="aggregate" data-query-label="Aggregate by region">
+                  <strong>Aggregate by region</strong>
+                  <span>Run a simple grouping query over the fixture.</span>
+                  <code>GROUP BY n_regionkey</code>
+                </button>
+              </div>
+            </section>
+
             <div class="editor-field query-editor-field">
               <label for="sql-editor">SQL</label>
               <textarea class="editor-textarea sql-editor" id="sql-editor" spellcheck="false" aria-label="SQL query"></textarea>
@@ -221,5 +253,6 @@
     </footer>
 
     <script type="module" src="./app.mjs"></script>
+    <script type="module" src="./query-examples.mjs"></script>
   </body>
 </html>
