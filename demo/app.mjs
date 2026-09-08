@@ -11,6 +11,7 @@ const resultHead = document.querySelector('#result-head')
 const resultBody = document.querySelector('#result-body')
 const resultSummary = document.querySelector('#result-summary')
 const fixtureUrlValue = document.querySelector('#fixture-url')
+const fixtureContentVersionValue = document.querySelector('#fixture-content-version')
 const fixtureRowsValue = document.querySelector('#fixture-rows')
 const fixtureBytesValue = document.querySelector('#fixture-bytes')
 const fixtureColumnsValue = document.querySelector('#fixture-columns')
@@ -104,6 +105,7 @@ function resetResultView() {
 function populateFixtureInfo(metadata, parquetUrl) {
   fixtureUrlValue.href = parquetUrl
   fixtureUrlValue.textContent = parquetUrl
+  fixtureContentVersionValue.textContent = metadata.contentVersion
   fixtureRowsValue.textContent = Number(metadata.rows).toLocaleString()
   fixtureBytesValue.textContent = formatBytes(Number(metadata.bytes))
   fixtureColumnsValue.textContent = metadata.columns.map((column) => `${column.name} ${column.type}`).join(', ')
@@ -116,7 +118,9 @@ async function resetEditors({ announce = true } = {}) {
   catalogEditor.value = `${JSON.stringify(defaultCatalog(metadata, parquetUrl), null, 2)}\n`
   sqlEditor.value = defaultSql
   if (announce) {
-    statusText.textContent = 'Editors reset. Runtime is ready; Run SQL to apply the default catalog.'
+    statusText.textContent = activeRuntime
+      ? 'Editors reset. Runtime is ready; Run SQL to apply the default catalog.'
+      : 'Editors reset. Reload the page to retry runtime startup.'
   }
 }
 
@@ -214,34 +218,40 @@ async function probeParquet(parquetUrl) {
 }
 
 async function initializeCatalog(database, worker, catalogName, catalogSnapshot) {
-  const catalog = await InMemoryCatalogController.initialize(
-    database,
-    worker,
-    {
-      workspaceId: `pages-demo-${crypto.randomUUID()}`,
-      catalogName,
-      extensionName: new URL(
-        './extension/in_memory_catalog.duckdb_extension.wasm',
-        rootUrl,
-      ).href,
-    },
-    1n,
-    catalogSnapshot,
-  )
-
-  const defaultSchema = firstSchemaName(catalogSnapshot)
-  if (defaultSchema) {
-    await catalog.connection.query(
-      `USE ${quoteIdentifier(catalogName)}.${quoteIdentifier(defaultSchema)}`,
+  let catalog
+  try {
+    catalog = await InMemoryCatalogController.initialize(
+      database,
+      worker,
+      {
+        workspaceId: `pages-demo-${crypto.randomUUID()}`,
+        catalogName,
+        extensionName: new URL(
+          './extension/in_memory_catalog.duckdb_extension.wasm',
+          rootUrl,
+        ).href,
+      },
+      1n,
+      catalogSnapshot,
     )
-  }
 
-  return {
-    catalog,
-    catalogName,
-    catalogSnapshot,
-    catalogKey: catalogKey(catalogName, catalogSnapshot),
-    defaultSchema,
+    const defaultSchema = firstSchemaName(catalogSnapshot)
+    if (defaultSchema) {
+      await catalog.connection.query(
+        `USE ${quoteIdentifier(catalogName)}.${quoteIdentifier(defaultSchema)}`,
+      )
+    }
+
+    return {
+      catalog,
+      catalogName,
+      catalogSnapshot,
+      catalogKey: catalogKey(catalogName, catalogSnapshot),
+      defaultSchema,
+    }
+  } catch (error) {
+    await catalog?.close().catch(() => {})
+    throw error
   }
 }
 
@@ -263,7 +273,10 @@ async function ensureCatalog(catalogName, catalogSnapshot) {
   setStep('catalog', 'active', 'Applying edited catalog')
   await activeRuntime.catalog?.close()
   activeRuntime.catalog = null
+  activeRuntime.catalogName = null
+  activeRuntime.catalogSnapshot = null
   activeRuntime.catalogKey = null
+  activeRuntime.defaultSchema = null
 
   const nextCatalog = await initializeCatalog(
     activeRuntime.database,
@@ -399,6 +412,7 @@ async function runDemo() {
         sql,
         hostedFile: {
           url: activeRuntime.parquetUrl,
+          contentVersion: activeRuntime.metadata.contentVersion,
           rows: activeRuntime.metadata.rows,
           bytes: activeRuntime.metadata.bytes,
           rangeSupported: activeRuntime.sourceProbe.rangeSupported,
