@@ -11,6 +11,7 @@ export default defineConfig({
       srcDir: 'content',
       outDir: '../build/pages/docs',
       base,
+      docs: false,
       i18n: {
         enabled: true,
         defaultLocale: 'en',
