@@ -7,24 +7,54 @@ description: Set up DuckDB-Wasm, initialize the in-memory catalog, and run your 
 
 This guide shows the shortest path from a DuckDB-Wasm database to a queryable in-memory catalog.
 
-## 1. Prepare DuckDB-Wasm
+> [!NOTE]
+> The repository is not published as an npm package yet. The examples below use the browser assets produced by this repository. When integrating into another build, keep the same module and Worker boundaries.
 
-Create the DuckDB Worker and database as usual. The host application owns their lifecycle.
+## 1. Prepare the browser assets
+
+The catalog needs a custom Worker wrapper in addition to DuckDB-Wasm. That Worker loads the catalog router, metadata store, Worker runtime, and DuckDB's browser Worker into one Dedicated Worker.
+
+Serve these assets from your application:
+
+```text
+/in-memory-catalog/in-memory-catalog-controller.mjs
+/in-memory-catalog/in-memory-catalog-worker.js
+/in-memory-catalog/common-worker-router.js
+/in-memory-catalog/in-memory-catalog-metadata-store.js
+/in-memory-catalog/in-memory-catalog-worker-runtime.js
+/duckdb/duckdb-browser-eh.worker.js
+/duckdb/duckdb-eh.wasm
+/extension/in_memory_catalog.duckdb_extension.wasm
+```
+
+The repository's `scripts/build-pages.mjs` shows one concrete way to assemble them.
+
+## 2. Create DuckDB-Wasm with the catalog Worker
 
 ```js
 import * as duckdb from '@duckdb/duckdb-wasm'
-import { InMemoryCatalogController } from 'duckdb-wasm-in-memory-catalog'
+import { InMemoryCatalogController } from '/in-memory-catalog/in-memory-catalog-controller.mjs'
 
-const bundle = await duckdb.selectBundle(duckdb.getJsDelivrBundles())
-const worker = new Worker(bundle.mainWorker)
+const worker = new Worker('/in-memory-catalog/in-memory-catalog-worker.js')
 const db = new duckdb.AsyncDuckDB(new duckdb.VoidLogger(), worker)
 
-await db.instantiate(bundle.mainModule)
+await db.instantiate('/duckdb/duckdb-eh.wasm')
+await db.open({
+  allowUnsignedExtensions: true,
+  maximumThreads: 1,
+  filesystem: {
+    reliableHeadRequests: false,
+    allowFullHTTPReads: true,
+    forceFullHTTPReads: false,
+  },
+})
 ```
 
-The catalog controller uses the same Worker as DuckDB-Wasm so the extension can request metadata from the application-side metadata store.
+The same Worker is used by DuckDB-Wasm and the catalog controller. A normal DuckDB browser Worker is not sufficient because it does not handle the catalog's namespaced metadata messages.
 
-## 2. Define a snapshot
+`allowUnsignedExtensions` is required when loading the locally built Wasm extension.
+
+## 3. Define a snapshot
 
 A snapshot is the complete catalog state for one revision.
 
@@ -58,7 +88,7 @@ const snapshot = {
 
 The catalog does not infer a scanner from the filename or URI. Every table declares its scanner explicitly.
 
-## 3. Initialize the catalog
+## 4. Initialize the catalog
 
 ```js
 const catalog = await InMemoryCatalogController.initialize(
@@ -76,7 +106,7 @@ const catalog = await InMemoryCatalogController.initialize(
 
 Initialization loads Parquet support, loads the in-memory catalog extension, publishes the initial snapshot, and attaches the catalog read-only.
 
-## 4. Query it
+## 5. Query it
 
 ```js
 const result = await catalog.connection.query(`
@@ -87,7 +117,7 @@ const result = await catalog.connection.query(`
 
 Use `catalog.connection` for queries that need the attached catalog.
 
-## 5. Clean up
+## 6. Clean up
 
 ```js
 await catalog.close()
@@ -95,7 +125,7 @@ await db.terminate()
 worker.terminate()
 ```
 
-Closing the controller detaches the catalog and drops its Worker-side snapshot. It does not terminate the DuckDB Worker.
+Closing the controller detaches the catalog and drops its Worker-side snapshot. It does not terminate the DuckDB Worker or database.
 
 ## Next steps
 
