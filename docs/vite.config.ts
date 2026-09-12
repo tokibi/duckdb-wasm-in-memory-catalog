@@ -1,16 +1,16 @@
 import { defineConfig } from 'vite'
 import { defaultTheme, defineTheme, oxContent } from '@ox-content/vite-plugin'
 
-const repositoryBase = '/duckdb-wasm-in-memory-catalog/'
-const docsBase = `${repositoryBase}docs/`
+const base = '/duckdb-wasm-in-memory-catalog/docs/'
+const demoUrl = 'https://tokibi.github.io/duckdb-wasm-in-memory-catalog/'
 
 export default defineConfig({
-  base: docsBase,
+  base,
   plugins: [
     oxContent({
       srcDir: 'content',
       outDir: '../build/pages/docs',
-      base: docsBase,
+      base,
       i18n: {
         enabled: true,
         defaultLocale: 'en',
@@ -31,8 +31,8 @@ export default defineConfig({
         theme: defineTheme({
           extends: defaultTheme,
           nav: [
-            { text: { en: 'Guide', ja: 'ガイド' }, link: `${docsBase}getting-started/` },
-            { text: { en: 'Live demo', ja: 'ライブデモ' }, link: repositoryBase },
+            { text: { en: 'Guide', ja: 'ガイド' }, link: '/getting-started/' },
+            { text: { en: 'Live demo', ja: 'ライブデモ' }, link: demoUrl },
             { text: 'GitHub', link: 'https://github.com/tokibi/duckdb-wasm-in-memory-catalog' },
           ],
           sidebar: [
