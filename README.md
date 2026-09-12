@@ -50,6 +50,8 @@ Catalog metadata
 
 Each publication contains a uint64 revision and a complete snapshot. A newer revision atomically replaces the current snapshot, the same revision with identical content is idempotent, and stale or conflicting revisions are rejected without changing the current state.
 
+`table.snapshot` is the cache-version identity for that table. The host must change it whenever the bytes or physical Parquet schema represented by the table's files change. The global catalog revision is intentionally not used for file cache versioning: changing an unrelated table therefore does not change this table's scan path.
+
 `format_version: 2` requires every table to declare a scanner explicitly. The Catalog never chooses a scanner from `files[].uri`.
 
 Enumeration returns schema names, table names, and column definitions without copying file URIs into DuckDB-Wasm. Table lookup returns the file descriptors for the referenced table only. Catalog mutation statements are rejected because the application remains the metadata authority.
@@ -104,6 +106,22 @@ scanner: {
 Non-empty Parquet options and other scanner types are currently rejected. CSV and other scanners can be added by defining their supported options and scan implementation while keeping the same table/file structure.
 
 The current Parquet scanner validates the physical schema against the published column count, order, names, and types.
+
+### Scan URI and cache identity
+
+The host-supplied `files[].uri` is retained unchanged in catalog metadata. When the Parquet scan is bound, the extension derives a DuckDB-facing URI from that URI and the table's `snapshot`:
+
+```text
+metadata URI:
+  https://example.test/files/events
+
+DuckDB scan URI:
+  https://example.test/files/events#duckdb-snapshot=events-r42
+```
+
+For HTTP(S) URIs, the snapshot is percent-encoded and appended as the internal `duckdb-snapshot` fragment parameter. An existing fragment is preserved byte-for-byte and the internal parameter is appended with `&`; an empty existing fragment (`#`) receives the parameter directly. Non-HTTP(S) URIs are passed to DuckDB unchanged. The same table snapshot produces the same scan path, while a changed table snapshot produces a different path. Catalog revision changes alone do not change it.
+
+The fragment is local to DuckDB's file and Parquet metadata caches. URL fragments are not sent in HTTP requests, so the gateway or Service Worker still receives the base URI. This prevents reuse of DuckDB cache entries across table snapshots, but it cannot make a mutable remote resource version-aware while an older query is still issuing requests. Applications must serialize publishing a content-changing snapshot with queries that read the affected table (a query must not span the content update). If concurrent cross-revision queries are required, the remote gateway must expose a version identity it can observe, such as a query parameter or immutable path.
 
 ## Runtime ownership
 

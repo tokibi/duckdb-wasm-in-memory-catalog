@@ -1,4 +1,4 @@
-.PHONY: configure build build-wasm test pages
+.PHONY: configure build build-wasm test test-js test-scan-uri pages
 
 DUCKDB_DIR := $(CURDIR)/duckdb
 NATIVE_BUILD_DIR := $(CURDIR)/build/native
@@ -15,7 +15,16 @@ build-wasm:
 	sh scripts/build-wasm.sh
 
 test:
+	$(MAKE) test-js
+	$(MAKE) test-scan-uri
+
+test-js:
 	npm test
+
+test-scan-uri:
+	@mkdir -p build
+	c++ -std=c++17 -Isrc/include test/native/in_memory_catalog_scan_uri_test.cpp -o build/in_memory_catalog_scan_uri_test
+	build/in_memory_catalog_scan_uri_test
 
 pages: build build-wasm
 	npm run build:pages
