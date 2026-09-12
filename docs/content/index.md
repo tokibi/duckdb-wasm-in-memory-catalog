@@ -21,10 +21,10 @@ Use this project when your application already has a declarative dataset model a
 
 ## Start here
 
-1. [Set up the runtime](./getting-started/setup.md).
-2. [Publish your first catalog](./getting-started/first-catalog.md).
-3. Read the [catalog model](./concepts/catalog-model.md) before integrating application data.
-4. Use the [snapshot format reference](./reference/snapshot-format.md) when generating metadata.
+1. [Getting started](./getting-started.md) — initialize the runtime and run the first query.
+2. [Guides](./guides.md) — publish, update, query, and operate catalogs.
+3. [Concepts](./concepts.md) — understand revisions, table snapshots, scanners, cache identity, and runtime ownership.
+4. [Reference](./reference.md) — snapshot format, JavaScript API, errors, limitations, and development commands.
 
 The [live demo](../) runs the same catalog implementation in the browser with an editable snapshot and SQL query.
 
