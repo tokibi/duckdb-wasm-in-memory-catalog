@@ -37,37 +37,13 @@ export default defineConfig({
           ],
           sidebar: [
             {
-              text: 'Getting started',
+              text: 'Documentation',
               items: [
                 { text: 'Overview', link: '/index.md' },
-                { text: 'Setup', link: '/getting-started/setup.md' },
-                { text: 'Your first catalog', link: '/getting-started/first-catalog.md' },
-              ],
-            },
-            {
-              text: 'Guides',
-              items: [
-                { text: 'Publishing catalogs', link: '/guides/publishing-catalogs.md' },
-                { text: 'Updating catalogs', link: '/guides/updating-catalogs.md' },
-                { text: 'Querying', link: '/guides/querying.md' },
-              ],
-            },
-            {
-              text: 'Concepts',
-              items: [
-                { text: 'Catalog model', link: '/concepts/catalog-model.md' },
-                { text: 'Snapshots and revisions', link: '/concepts/snapshots-and-revisions.md' },
-                { text: 'Scanners and files', link: '/concepts/scanners-and-files.md' },
-                { text: 'Runtime model', link: '/concepts/runtime-model.md' },
-              ],
-            },
-            {
-              text: 'Reference',
-              items: [
-                { text: 'Snapshot format', link: '/reference/snapshot-format.md' },
-                { text: 'JavaScript API', link: '/reference/javascript-api.md' },
-                { text: 'Errors', link: '/reference/errors.md' },
-                { text: 'Limitations', link: '/reference/limitations.md' },
+                { text: 'Getting started', link: '/getting-started.md' },
+                { text: 'Guides', link: '/guides.md' },
+                { text: 'Concepts', link: '/concepts.md' },
+                { text: 'Reference', link: '/reference.md' },
               ],
             },
           ],
