@@ -24,6 +24,7 @@
 #include "duckdb/transaction/transaction.hpp"
 #include "duckdb/transaction/transaction_manager.hpp"
 #include "yyjson.hpp"
+#include "in_memory_catalog_scan_uri.hpp"
 #include "parquet_multi_file_info.hpp"
 
 #include <atomic>
@@ -57,6 +58,7 @@ struct CatalogTableDescriptor {
 	vector<CatalogColumnMetadata> columns;
 	vector<CatalogFileMetadata> files;
 };
+
 std::atomic<uint64_t> catalog_table_entry_count {0};
 std::atomic<uint64_t> catalog_table_entry_high_watermark {0};
 std::atomic<uint64_t> catalog_schema_entry_count {0};
@@ -570,10 +572,11 @@ public:
 		vector<Value> files;
 		files.reserve(descriptor->files.size());
 		for (const auto &file : descriptor->files) {
-			files.push_back(Value(file.uri));
+			files.push_back(Value(in_memory_catalog::MakeDuckDBScanURI(file.uri, descriptor->snapshot_id)));
 		}
 		// Metadata is supplied to parquet_scan so DESCRIBE/EXPLAIN stay remote-free.
-		// URIs are opaque to the Catalog; the production runtime uses same-origin HTTP URLs.
+		// The host URI remains opaque metadata; only the scanner receives the
+		// snapshot-versioned URI.
 		named_parameter_map_t named_parameters;
 		auto schema_struct_type = LogicalType::STRUCT(
 		    {{"name", LogicalType::VARCHAR}, {"type", LogicalType::VARCHAR}, {"default_value", LogicalType::VARCHAR}});

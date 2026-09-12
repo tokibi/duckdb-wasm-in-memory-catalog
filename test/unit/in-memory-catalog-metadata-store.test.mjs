@@ -51,6 +51,25 @@ describe('InMemoryCatalogMetadataStore', () => {
     assert.doesNotMatch(JSON.stringify(store.listTables('workspace', '1', 'main')), /uri|files|scanner/)
   })
 
+  it('keeps host file URIs stable when only the table snapshot changes', async () => {
+    const store = new InMemoryCatalogMetadataStore()
+    const session = store.openWorkspaceSession('workspace')
+
+    const firstSnapshot = snapshot('https://example.test/stable-file')
+    await session.replaceCatalogSnapshot(1n, firstSnapshot)
+    const firstTable = store.lookupTable('workspace', '1', 'main', 'table1')
+
+    const secondSnapshot = snapshot('https://example.test/stable-file')
+    secondSnapshot.schemas[0].tables[0].snapshot = 'snapshot-2'
+    await session.replaceCatalogSnapshot(2n, secondSnapshot)
+    const secondTable = store.lookupTable('workspace', '2', 'main', 'table1')
+
+    assert.deepEqual(firstTable.files, [{ uri: 'https://example.test/stable-file' }])
+    assert.deepEqual(secondTable.files, [{ uri: 'https://example.test/stable-file' }])
+    assert.equal(firstTable.snapshot, 'snapshot-1')
+    assert.equal(secondTable.snapshot, 'snapshot-2')
+  })
+
   it('requires an explicit supported scanner in format version 2', async () => {
     const store = new InMemoryCatalogMetadataStore()
     const session = store.openWorkspaceSession('workspace')

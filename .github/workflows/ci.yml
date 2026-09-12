@@ -18,7 +18,7 @@ jobs:
       - uses: actions/setup-node@v5
         with:
           node-version: 22
-      - run: npm test
+      - run: make test
 
   wasm:
     runs-on: ubuntu-latest
