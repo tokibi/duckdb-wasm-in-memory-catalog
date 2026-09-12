@@ -19,8 +19,12 @@ jobs:
         with:
           node-version: 22
           cache: pnpm
-      - run: pnpm install --frozen-lockfile --ignore-scripts
+      - run: pnpm install --no-frozen-lockfile --ignore-scripts
       - run: pnpm test
+      - uses: actions/upload-artifact@v4
+        with:
+          name: pnpm-lock
+          path: pnpm-lock.yaml
 
   wasm:
     name: Wasm extension build
