@@ -1,40 +1,23 @@
 name: CI
 
 on:
-  pull_request:
-    branches: [main]
   push:
-    branches: [main]
-
-permissions:
-  contents: read
+  pull_request:
 
 jobs:
-  unit:
+  test:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v5
+        with:
+          submodules: recursive
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.17.1
       - uses: actions/setup-node@v5
         with:
           node-version: 22
-      - run: make test
-
-  wasm:
-    runs-on: ubuntu-latest
-    timeout-minutes: 30
-    steps:
-      - uses: actions/checkout@v5
-        with:
-          submodules: recursive
-      - uses: emscripten-core/setup-emsdk@v15
-        with:
-          version: '3.1.56'
-          actions-cache-folder: emsdk-cache
-      - run: make build-wasm
-      - uses: actions/upload-artifact@v7
-        with:
-          name: in-memory-catalog-wasm
-          path: build/wasm_eh/extension/in_memory_catalog/in_memory_catalog.duckdb_extension.wasm
-          if-no-files-found: error
-          retention-days: 1
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile --ignore-scripts
+      - run: pnpm test
