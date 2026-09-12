@@ -7,7 +7,7 @@ on:
 
 jobs:
   unit:
-    name: Unit tests
+    name: Unit tests and docs
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
@@ -21,6 +21,7 @@ jobs:
           cache: pnpm
       - run: pnpm install --no-frozen-lockfile --ignore-scripts
       - run: pnpm test
+      - run: pnpm build:docs
       - uses: actions/upload-artifact@v4
         with:
           name: pnpm-lock
