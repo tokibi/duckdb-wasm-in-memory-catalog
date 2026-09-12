@@ -19,7 +19,7 @@ test:
 	$(MAKE) test-scan-uri
 
 test-js:
-	npm test
+	pnpm test
 
 test-scan-uri:
 	@mkdir -p build
@@ -27,4 +27,4 @@ test-scan-uri:
 	build/in_memory_catalog_scan_uri_test
 
 pages: build build-wasm
-	npm run build:pages
+	pnpm build:pages
