@@ -54,11 +54,10 @@ describe('InMemoryCatalogController', () => {
       db,
       worker,
       { workspaceId: 'workspace', catalogName: 'dataset', ackTimeoutMs: 100 },
-      1n,
       snapshot(),
     )
 
-    await controller.publishSnapshot(2n, snapshot('https://example.test/revision-2'))
+    await controller.publishSnapshot(snapshot('https://example.test/revision-2'))
     assert.equal((await controller.diagnostics()).active_workspace_session_count, 1)
     const firstClose = controller.close()
     const secondClose = controller.close()
@@ -77,7 +76,46 @@ describe('InMemoryCatalogController', () => {
     assert.equal(store.diagnostics().active_workspace_session_count, 0)
   })
 
-  it('closes successfully after publishing MAX_UINT64', async () => {
+  it('captures each submitted state before queuing and recovers from failed publication', async () => {
+    const store = new InMemoryCatalogMetadataStore()
+    const actualSession = store.openWorkspaceSession.bind(store)
+    const publishedNames = []
+    store.openWorkspaceSession = (...args) => {
+      const session = actualSession(...args)
+      return {
+        ...session,
+        async replaceCatalogSnapshot(candidate) {
+          await session.replaceCatalogSnapshot(candidate)
+          publishedNames.push(candidate.schemas[0].tables[0].name)
+        },
+      }
+    }
+    const worker = runtimeWorker(createInMemoryCatalogWorkerRuntime(store))
+    const { db } = fakeDatabase()
+    const controller = await InMemoryCatalogController.initialize(
+      db, worker, { workspaceId: 'workspace', catalogName: 'dataset', ackTimeoutMs: 100 }, snapshot(),
+    )
+    try {
+      const candidate = snapshot()
+      candidate.schemas[0].tables[0].name = 'first'
+      const first = controller.publishSnapshot(candidate)
+      candidate.schemas[0].tables[0].name = 'second'
+      const second = controller.publishSnapshot(candidate)
+      candidate.schemas[0].tables[0].name = 'not-submitted'
+      await Promise.all([first, second])
+      assert.deepEqual(publishedNames, ['table1', 'first', 'second'])
+      assert.equal(store.currentRevision('workspace'), 3n)
+      await assert.rejects(controller.publishSnapshot({}),
+        (error) => error.code === 'RC_METADATA_VERSION')
+      await controller.publishSnapshot(snapshot())
+      assert.equal(store.currentRevision('workspace'), 4n)
+      assert.equal('currentRevision' in controller, false)
+    } finally {
+      await controller.close()
+    }
+  })
+
+  it('closes successfully after publication', async () => {
     const store = new InMemoryCatalogMetadataStore()
     const worker = runtimeWorker(createInMemoryCatalogWorkerRuntime(store))
     const { db } = fakeDatabase()
@@ -85,7 +123,6 @@ describe('InMemoryCatalogController', () => {
       db,
       worker,
       { workspaceId: 'workspace', catalogName: 'dataset', ackTimeoutMs: 100 },
-      (1n << 64n) - 1n,
       snapshot(),
     )
 
@@ -111,7 +148,6 @@ describe('InMemoryCatalogController', () => {
           throw new Error('observer failure')
         },
       },
-      1n,
       snapshot(),
     )
 
@@ -125,7 +161,7 @@ describe('InMemoryCatalogController', () => {
     assert.equal(connection.closed, true)
     assert.deepEqual(recovery, [{ component: 'in_memory_catalog', workspaceId: 'workspace' }])
     await assert.rejects(
-      () => controller.publishSnapshot(2n, snapshot()),
+      () => controller.publishSnapshot(snapshot()),
       (error) => error.code === 'RC_CATALOG_WORKSPACE_CLOSED',
     )
   })
@@ -141,8 +177,6 @@ function workerWithoutDropAck() {
           type: 'IN_MEMORY_CATALOG_REPLACE_SNAPSHOT_RESULT',
           request_id: event.data.request_id,
           ok: true,
-          revision: event.data.catalog_revision.toString(),
-          idempotent: false,
         })
       }
     }

@@ -1,6 +1,6 @@
 ---
 title: Concepts
-description: Understand the catalog model, revisions, table snapshots, scanners, files, and runtime ownership.
+description: Understand complete snapshots, table snapshots, scanners, files, and runtime ownership.
 ---
 
 # Concepts
@@ -12,7 +12,7 @@ The in-memory catalog is a read-only projection of metadata owned by the host ap
 ```text
 application state
       │
-      │ complete snapshot + revision
+      │ complete snapshot
       ▼
 Catalog controller
       │
@@ -32,19 +32,17 @@ The application remains authoritative. DuckDB sees schemas, tables, and columns 
 
 ## Complete snapshots
 
-Each publication contains a complete snapshot rather than a patch. This makes synchronization deterministic: after a successful publication, the Worker-side metadata store represents exactly that revision.
+Each publication contains the complete catalog state. The controller copies the input at call time and sends publications to the Worker in call order. The Worker validates the entire snapshot before atomically replacing the current state. Failed validation leaves the current state unchanged.
 
-A newer revision atomically replaces the previous snapshot. Failed validation does not partially update the catalog.
+The last submitted valid snapshot becomes current. If asynchronous application work produces snapshots out of order, discard stale results before publishing them.
 
-## Catalog revision vs. table snapshot
+The Worker automatically maintains an internal counter for DuckDB metadata invalidation and generation checks during reads. Every successful publication advances it, including identical content; failed validation does not. Applications do not manage this counter.
 
-These two values solve different problems.
+## Table snapshot
 
-The **catalog revision** orders complete metadata publications. It must increase when publishing a new catalog state, even if a change affects only metadata unrelated to a particular table.
+The table `snapshot` identifies the bytes and physical schema represented by that table's files. Change it when those bytes or that physical schema changes.
 
-The **table `snapshot`** identifies the bytes and physical schema represented by that table's files. Change it when those bytes or that physical schema changes.
-
-Keeping these identities separate prevents an unrelated catalog update from invalidating DuckDB's file and Parquet caches for every table.
+Keeping a table's `snapshot` unchanged across unrelated catalog updates preserves its DuckDB file and Parquet cache identity.
 
 ## Scanners and files
 

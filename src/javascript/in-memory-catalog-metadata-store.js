@@ -43,28 +43,27 @@
       }
       this.#sessions.set(normalizedWorkspaceId, record)
 
-      const replaceCatalogSnapshot = (revision, snapshot) => {
+      const replaceCatalogSnapshot = (snapshot) => {
         if (record.closing) return Promise.reject(closedWorkspaceError())
-        const operation = record.pending.then(async () => {
-          const candidate = await buildCandidate(revision, snapshot)
-          const current = record.current
-          if (current && candidate.revision < current.revision) {
+        let candidate
+        try {
+          // Capture the caller's state before waiting for earlier publications.
+          candidate = normalizeSnapshot(snapshot)
+        } catch (error) {
+          return Promise.reject(error)
+        }
+        const operation = record.pending.then(() => {
+          // Internal generation: DuckDB cache invalidation and bridge consistency only.
+          // Application state ordering follows publication order, not this counter.
+          const revision = (record.current?.revision ?? 0n) + 1n
+          if (revision > MAX_UINT64) {
             throw new InMemoryCatalogError(
-              'RC_METADATA_STALE',
-              `Catalog revision ${candidate.revision} is older than current revision ${current.revision}`,
+              'RC_METADATA_GENERATION_EXHAUSTED',
+              'Catalog internal generation is exhausted; reopen the workspace',
             )
           }
-          if (current && candidate.revision === current.revision) {
-            if (candidate.fingerprint !== current.fingerprint) {
-              throw new InMemoryCatalogError(
-                'RC_METADATA_REVISION_CONFLICT',
-                `Catalog revision ${candidate.revision} already has different metadata`,
-              )
-            }
-            return { revision: candidate.revision.toString(), idempotent: true }
-          }
-          record.current = candidate
-          return { revision: candidate.revision.toString(), idempotent: false }
+          // Validate the complete candidate before atomically replacing current state.
+          record.current = Object.freeze({ revision, ...candidate })
         })
         record.pending = operation.catch(() => {})
         return operation
@@ -145,13 +144,6 @@
       }
       return published
     }
-  }
-
-  async function buildCandidate(revision, snapshotInput) {
-    const normalizedRevision = parsePublicRevision(revision)
-    const { snapshot, schemas } = normalizeSnapshot(snapshotInput)
-    const fingerprint = await sha256(JSON.stringify(snapshot))
-    return Object.freeze({ revision: normalizedRevision, fingerprint, snapshot, schemas })
   }
 
   function normalizeSnapshot(input) {
@@ -257,11 +249,6 @@
     return deepFreeze({ type, options: {} })
   }
 
-  function parsePublicRevision(value) {
-    if (typeof value === 'bigint' && value >= 0n && value <= MAX_UINT64) return value
-    invalid('Catalog revision must be a bigint in uint64 range')
-  }
-
   function parseBridgeRevision(value) {
     if (typeof value === 'bigint' && value >= 0n && value <= MAX_UINT64) return value
     if (typeof value === 'string' && DECIMAL_REVISION_PATTERN.test(value)) {
@@ -301,12 +288,6 @@
       if (nested && typeof nested === 'object' && !Object.isFrozen(nested)) deepFreeze(nested)
     }
     return value
-  }
-
-  async function sha256(value) {
-    const bytes = new TextEncoder().encode(value)
-    const digest = await global.crypto.subtle.digest('SHA-256', bytes)
-    return Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, '0')).join('')
   }
 
   function isRecord(value) {

@@ -35,15 +35,15 @@ This keeps catalog synchronization declarative: the latest application state bec
 
 ## Update a catalog
 
-Publish a newer complete snapshot with a monotonically increasing `bigint` revision.
+Publish a complete replacement snapshot:
 
 ```js
-await catalog.publishSnapshot(2n, nextSnapshot)
+await catalog.publishSnapshot(nextSnapshot)
 ```
 
-Publication is serialized by the controller. A newer revision atomically replaces the current snapshot. Re-publishing the same revision with identical content is idempotent. Stale revisions and conflicting reuse of a revision are rejected.
+The controller copies the input at call time and publishes snapshots in call order. A successfully validated snapshot atomically replaces the complete catalog state. Discard stale results from asynchronous application work before publishing them.
 
-Do not use the global revision as the table content version. Set each table's `snapshot` independently and change it only when that table's bytes or physical Parquet schema changes.
+Change each table's `snapshot` only when that table's bytes or physical Parquet schema changes.
 
 ## Query a catalog
 
@@ -100,7 +100,6 @@ const catalog = await InMemoryCatalogController.initialize(
       console.error('Catalog runtime must be recreated', workspaceId)
     },
   },
-  revision,
   snapshot,
 )
 ```

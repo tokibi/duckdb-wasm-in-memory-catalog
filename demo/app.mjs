@@ -252,7 +252,6 @@ async function initializeCatalog(database, worker, catalogName, catalogSnapshot)
           rootUrl,
         ).href,
       },
-      1n,
       catalogSnapshot,
     )
 

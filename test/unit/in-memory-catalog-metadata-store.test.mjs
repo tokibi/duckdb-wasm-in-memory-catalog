@@ -37,7 +37,7 @@ describe('InMemoryCatalogMetadataStore', () => {
     const store = new InMemoryCatalogMetadataStore()
     const session = store.openWorkspaceSession('workspace')
 
-    await session.replaceCatalogSnapshot(1n, snapshot())
+    await session.replaceCatalogSnapshot(snapshot())
 
     assert.equal(store.currentRevision('workspace'), 1n)
     assert.deepEqual(store.listSchemas('workspace', '1'), ['main'])
@@ -56,18 +56,57 @@ describe('InMemoryCatalogMetadataStore', () => {
     const session = store.openWorkspaceSession('workspace')
 
     const firstSnapshot = snapshot('https://example.test/stable-file')
-    await session.replaceCatalogSnapshot(1n, firstSnapshot)
+    await session.replaceCatalogSnapshot(firstSnapshot)
     const firstTable = store.lookupTable('workspace', '1', 'main', 'table1')
 
     const secondSnapshot = snapshot('https://example.test/stable-file')
     secondSnapshot.schemas[0].tables[0].snapshot = 'snapshot-2'
-    await session.replaceCatalogSnapshot(2n, secondSnapshot)
+    await session.replaceCatalogSnapshot(secondSnapshot)
     const secondTable = store.lookupTable('workspace', '2', 'main', 'table1')
 
     assert.deepEqual(firstTable.files, [{ uri: 'https://example.test/stable-file' }])
     assert.deepEqual(secondTable.files, [{ uri: 'https://example.test/stable-file' }])
     assert.equal(firstTable.snapshot, 'snapshot-1')
     assert.equal(secondTable.snapshot, 'snapshot-2')
+  })
+
+  it('assigns generations to ordered publications and rejects old bridge reads', async () => {
+    const store = new InMemoryCatalogMetadataStore()
+    const session = store.openWorkspaceSession('workspace')
+    const candidate = snapshot()
+    const first = session.replaceCatalogSnapshot(candidate)
+    candidate.schemas[0].tables[0].name = 'renamed'
+    const second = session.replaceCatalogSnapshot(candidate)
+    candidate.schemas[0].tables[0].name = 'not-submitted'
+    await Promise.all([first, second])
+
+    assert.equal(store.currentRevision('workspace'), 2n)
+    assert.equal(store.listTables('workspace', '2', 'main')[0].name, 'renamed')
+    assert.equal(store.lookupTable('workspace', '2', 'main', 'renamed').snapshot, 'snapshot-1')
+    assert.throws(
+      () => store.listTables('workspace', '1', 'main'),
+      (error) => error.code === 'RC_METADATA_REVISION_CHANGED',
+    )
+    await session.replaceCatalogSnapshot(snapshot())
+    await session.replaceCatalogSnapshot(snapshot())
+    assert.equal(store.currentRevision('workspace'), 4n)
+    assert.equal(store.diagnostics().retained_workspace_snapshot_count, 1)
+  })
+
+  it('keeps the published state and generation after failed validation, then accepts the next publication', async () => {
+    const store = new InMemoryCatalogMetadataStore()
+    const session = store.openWorkspaceSession('workspace')
+    await session.replaceCatalogSnapshot(snapshot())
+    const invalid = snapshot()
+    invalid.schemas[0].tables[0].files = []
+    await expectCode(() => session.replaceCatalogSnapshot(invalid), 'RC_METADATA_INVALID')
+    assert.equal(store.currentRevision('workspace'), 1n)
+    assert.equal(store.lookupTable('workspace', '1', 'main', 'table1').files[0].uri,
+      'https://example.test/table')
+    await session.replaceCatalogSnapshot(snapshot('https://example.test/new'))
+    assert.equal(store.currentRevision('workspace'), 2n)
+    assert.equal(store.lookupTable('workspace', '2', 'main', 'table1').files[0].uri,
+      'https://example.test/new')
   })
 
   it('requires an explicit supported scanner in format version 2', async () => {
@@ -77,21 +116,21 @@ describe('InMemoryCatalogMetadataStore', () => {
     const missing = snapshot()
     delete missing.schemas[0].tables[0].scanner
     await expectCode(
-      () => session.replaceCatalogSnapshot(1n, missing),
+      () => session.replaceCatalogSnapshot(missing),
       'RC_METADATA_INVALID',
     )
 
     const unsupported = snapshot()
     unsupported.schemas[0].tables[0].scanner.type = 'csv'
     await expectCode(
-      () => session.replaceCatalogSnapshot(1n, unsupported),
+      () => session.replaceCatalogSnapshot(unsupported),
       'RC_SCANNER_UNSUPPORTED',
     )
 
     const options = snapshot()
     options.schemas[0].tables[0].scanner.options = { hive_partitioning: true }
     await expectCode(
-      () => session.replaceCatalogSnapshot(1n, options),
+      () => session.replaceCatalogSnapshot(options),
       'RC_METADATA_INVALID',
     )
 
@@ -105,7 +144,7 @@ describe('InMemoryCatalogMetadataStore', () => {
     legacy.format_version = 1
 
     await expectCode(
-      () => session.replaceCatalogSnapshot(1n, legacy),
+      () => session.replaceCatalogSnapshot(legacy),
       'RC_METADATA_VERSION',
     )
   })
@@ -120,7 +159,7 @@ describe('InMemoryCatalogMetadataStore', () => {
       name: `table${index + 1}`,
     }))
 
-    await session.replaceCatalogSnapshot(1n, candidate)
+    await session.replaceCatalogSnapshot(candidate)
     const tables = store.listTables('workspace', '1', 'main')
 
     assert.equal(tables.length, 100_000)
@@ -140,7 +179,7 @@ describe('InMemoryCatalogMetadataStore', () => {
     legacy.schemas[0].tables[0].files[0].hash = `sha256:${'a'.repeat(64)}`
 
     await expectCode(
-      () => session.replaceCatalogSnapshot(1n, legacy),
+      () => session.replaceCatalogSnapshot(legacy),
       'RC_METADATA_INVALID',
     )
     assert.equal(store.hasWorkspace('workspace'), true)
@@ -151,7 +190,7 @@ describe('InMemoryCatalogMetadataStore', () => {
       uri: 'https://example.test/table',
     })
     await expectCode(
-      () => session.replaceCatalogSnapshot(1n, duplicate),
+      () => session.replaceCatalogSnapshot(duplicate),
       'RC_METADATA_INVALID',
     )
   })
@@ -164,7 +203,7 @@ describe('InMemoryCatalogMetadataStore', () => {
       () => store.openWorkspaceSession('workspace'),
       (error) => error.code === 'RC_CATALOG_WORKSPACE_ALREADY_ACTIVE',
     )
-    await session.replaceCatalogSnapshot((1n << 64n) - 1n, snapshot())
+    await session.replaceCatalogSnapshot(snapshot())
     await session.dropCatalogWorkspace()
 
     assert.deepEqual(store.diagnostics(), {
@@ -175,13 +214,13 @@ describe('InMemoryCatalogMetadataStore', () => {
       uri_descriptor_transfer_count: 0,
     })
     await expectCode(
-      () => session.replaceCatalogSnapshot(1n, snapshot()),
+      () => session.replaceCatalogSnapshot(snapshot()),
       'RC_CATALOG_WORKSPACE_CLOSED',
     )
 
     const replacement = store.openWorkspaceSession('workspace')
-    await replacement.replaceCatalogSnapshot(0n, snapshot())
-    assert.equal(store.currentRevision('workspace'), 0n)
+    await replacement.replaceCatalogSnapshot(snapshot())
+    assert.equal(store.currentRevision('workspace'), 1n)
   })
 
   it('drops after a rejected pending replacement instead of leaking the session', async () => {
@@ -191,7 +230,7 @@ describe('InMemoryCatalogMetadataStore', () => {
     invalid.schemas[0].tables[0].files = []
 
     await expectCode(
-      () => session.replaceCatalogSnapshot(1n, invalid),
+      () => session.replaceCatalogSnapshot(invalid),
       'RC_METADATA_INVALID',
     )
     await session.dropCatalogWorkspace()
