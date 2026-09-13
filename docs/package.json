@@ -1,0 +1,13 @@
+{
+  "name": "duckdb-wasm-in-memory-catalog-docs",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build"
+  },
+  "devDependencies": {
+    "@ox-content/vite-plugin": "3.2.2",
+    "vite": "8.0.0"
+  }
+}

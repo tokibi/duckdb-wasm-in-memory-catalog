@@ -1,4 +1,4 @@
-name: GitHub Pages demo
+name: GitHub Pages
 
 on:
   push:
@@ -16,7 +16,7 @@ concurrency:
 
 jobs:
   build:
-    name: Build demo site
+    name: Build demo and docs site
     if: ${{ github.event.repository.visibility == 'public' }}
     runs-on: ubuntu-latest
     timeout-minutes: 15
@@ -24,23 +24,27 @@ jobs:
       - uses: actions/checkout@v5
         with:
           submodules: recursive
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.17.1
       - uses: actions/setup-node@v5
         with:
           node-version: 22
-      - run: npm install --ignore-scripts --no-audit --no-fund
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile --ignore-scripts
       - uses: emscripten-core/setup-emsdk@v15
         with:
           version: '3.1.56'
           actions-cache-folder: emsdk-cache
       - run: make build-wasm
-      - run: npm run build:pages
+      - run: pnpm build:pages
       - uses: actions/configure-pages@v5
       - uses: actions/upload-pages-artifact@v4
         with:
           path: build/pages
 
   deploy:
-    name: Deploy demo site
+    name: Deploy demo and docs site
     if: ${{ github.event.repository.visibility == 'public' }}
     environment:
       name: github-pages
