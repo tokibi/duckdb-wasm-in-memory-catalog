@@ -56,7 +56,7 @@ The same Worker is used by DuckDB-Wasm and the catalog controller. A normal Duck
 
 ## 3. Define a snapshot
 
-A snapshot is the complete catalog state for one revision.
+A snapshot is the complete catalog state that the Worker publishes atomically.
 
 ```js
 const snapshot = {
@@ -99,7 +99,6 @@ const catalog = await InMemoryCatalogController.initialize(
     catalogName: 'app',
     extensionName: '/extension/in_memory_catalog.duckdb_extension.wasm',
   },
-  1n,
   snapshot,
 )
 ```
@@ -129,4 +128,4 @@ Closing the controller detaches the catalog and drops its Worker-side snapshot. 
 
 ## Next steps
 
-Read [Guides](./guides.md) for publication and update workflows, then [Concepts](./concepts.md) for revision, snapshot, scanner, and cache semantics.
+Read [Guides](./guides.md) for publication and update workflows, then [Concepts](./concepts.md) for generation, snapshot, scanner, and cache semantics.

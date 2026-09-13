@@ -35,15 +35,15 @@ function toCatalogSnapshot(datasets) {
 
 ## Catalog を更新する
 
-単調増加する `bigint` revision と新しい完全 snapshot を publish します。
+新しい完全 snapshot を publish します。
 
 ```js
-await catalog.publishSnapshot(2n, nextSnapshot)
+await catalog.publishSnapshot(nextSnapshot)
 ```
 
-Controller は publication を直列化します。新しい revision は現在の snapshot を atomic に置き換えます。同一 revision・同一内容の再 publish は idempotent です。古い revision や、同じ revision に異なる内容を割り当てる操作は拒否されます。
+Controller は呼び出し時の内容を複製し、呼び出し順に publish します。検証に成功した snapshot が現在の catalog 全体を一括置換します。非同期処理で古い結果が遅れて届く場合は、publish 前に除外してください。
 
-Global な catalog revision を table の content version として使わないでください。各 table の `snapshot` は独立して管理し、その table の bytes または physical Parquet schema が変わったときだけ変更します。
+各 table の `snapshot` は、その table の bytes または physical Parquet schema が変わったときだけ変更します。
 
 ## Catalog を query する
 
@@ -100,7 +100,6 @@ const catalog = await InMemoryCatalogController.initialize(
       console.error('Catalog runtime must be recreated', workspaceId)
     },
   },
-  revision,
   snapshot,
 )
 ```

@@ -56,7 +56,7 @@ await db.open({
 
 ## 3. Snapshot を定義する
 
-Snapshot は、ある revision 時点の catalog 全体を表します。
+Snapshot は、Worker が atomic に publish する catalog 全体の状態を表します。
 
 ```js
 const snapshot = {
@@ -99,7 +99,6 @@ const catalog = await InMemoryCatalogController.initialize(
     catalogName: 'app',
     extensionName: '/extension/in_memory_catalog.duckdb_extension.wasm',
   },
-  1n,
   snapshot,
 )
 ```
@@ -129,4 +128,4 @@ Controller を close すると catalog を detach し、Worker 側の snapshot �
 
 ## 次に読むもの
 
-Catalog の publish / update の実践的な使い方は [Guides](./guides.md)、revision・snapshot・scanner・cache の意味は [Concepts](./concepts.md) を参照してください。
+Catalog の publish / update の実践的な使い方は [Guides](./guides.md)、snapshot・scanner・cache の意味は [Concepts](./concepts.md) を参照してください。

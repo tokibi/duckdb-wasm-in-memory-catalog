@@ -1,5 +1,3 @@
-const MAX_UINT64 = (1n << 64n) - 1n
-
 export class InMemoryCatalogControllerError extends Error {
   constructor(code, message) {
     super(message)
@@ -17,11 +15,10 @@ export class InMemoryCatalogController {
   #pending = Promise.resolve()
   #closePromise
   #attached = false
-  #currentRevision
   #state = 'active'
   #recoveryReported = false
 
-  static async initialize(db, worker, options, initialRevision, initialSnapshot) {
+  static async initialize(db, worker, options, initialSnapshot) {
     const normalized = normalizeOptions(options)
     const connection = await db.connect()
     let controller
@@ -34,7 +31,7 @@ export class InMemoryCatalogController {
         normalized.ackTimeoutMs,
       )
       controller = new InMemoryCatalogController(connection, session, normalized)
-      await controller.publishSnapshot(initialRevision, initialSnapshot)
+      await controller.publishSnapshot(initialSnapshot)
       await connection.query(
         `ATTACH ${quote(normalized.workspaceId)} AS ${quoteIdentifier(normalized.catalogName)} ` +
         '(TYPE in_memory_catalog, READ_ONLY)',
@@ -67,36 +64,33 @@ export class InMemoryCatalogController {
     return this.#connection
   }
 
-  get currentRevision() {
-    return this.#currentRevision
-  }
-
   get state() {
     return this.#state
   }
 
-  publishSnapshot(revision, snapshot) {
+  publishSnapshot(snapshot) {
     if (this.#state !== 'active') {
       return Promise.reject(new InMemoryCatalogControllerError(
         'RC_CATALOG_WORKSPACE_CLOSED',
         'In-Memory Catalog workspace controller is closed',
       ))
     }
-    const normalizedRevision = normalizeRevision(revision)
+    let submittedSnapshot
+    try {
+      submittedSnapshot = structuredClone(snapshot)
+    } catch {
+      return Promise.reject(new InMemoryCatalogControllerError(
+        'RC_METADATA_INVALID',
+        'Catalog snapshot must be structured-cloneable',
+      ))
+    }
     const operation = this.#pending.then(async () => {
       const result = await this.#session.request(
         'IN_MEMORY_CATALOG_REPLACE_SNAPSHOT',
         'IN_MEMORY_CATALOG_REPLACE_SNAPSHOT_RESULT',
-        { catalog_revision: normalizedRevision, snapshot },
+        { snapshot: submittedSnapshot },
       )
       requireSuccessfulResult(result, 'Catalog publication failed')
-      if (result.revision !== normalizedRevision.toString()) {
-        throw new InMemoryCatalogControllerError(
-          'RC_REMOTE_IO',
-          'Catalog publication returned an unexpected revision',
-        )
-      }
-      this.#currentRevision = normalizedRevision
     })
     this.#pending = operation.catch(() => {})
     return operation
@@ -324,14 +318,6 @@ function normalizeOptions(options) {
     ackTimeoutMs,
     onRecoveryRequired: options.onRecoveryRequired,
   }
-}
-
-function normalizeRevision(value) {
-  if (typeof value === 'bigint' && value >= 0n && value <= MAX_UINT64) return value
-  throw new InMemoryCatalogControllerError(
-    'RC_METADATA_INVALID',
-    'Catalog revision must be a bigint in uint64 range',
-  )
 }
 
 function requireSuccessfulResult(result, fallbackMessage) {

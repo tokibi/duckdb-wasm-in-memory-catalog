@@ -1,6 +1,6 @@
 ---
 title: Concepts
-description: catalog model、revision、table snapshot、scanner、file、runtime ownership の考え方を説明します。
+description: complete snapshot、table snapshot、scanner、file、runtime ownership の考え方を説明します。
 ---
 
 # Concepts
@@ -12,7 +12,7 @@ In-memory catalog は、ホストアプリケーションが管理するメタ�
 ```text
 application state
       │
-      │ complete snapshot + revision
+      │ complete snapshot
       ▼
 Catalog controller
       │
@@ -32,19 +32,17 @@ Authority は常にアプリケーション側にあります。DuckDB からは
 
 ## Complete snapshot
 
-各 publication は patch ではなく catalog 全体の完全 snapshot を含みます。そのため同期結果が明確になり、publish 成功後の Worker-side metadata store は、その revision の状態と一致します。
+各 publication は catalog 全体の完全 snapshot を含みます。Controller は呼び出し時の内容を複製し、呼び出し順に Worker へ送ります。Worker は検証に成功した snapshot で現在の状態を一括置換します。検証に失敗しても現在の状態は変わりません。
 
-新しい revision は前の snapshot を atomic に置き換えます。Validation に失敗しても catalog が部分的に更新されることはありません。
+最後に渡された有効な snapshot が現在の状態になります。非同期処理で古い結果が遅れて届く場合は、アプリケーション側で publish 前に除外してください。
 
-## Catalog revision と table snapshot
+DuckDB のメタデータ更新検知と読み取り時の世代照合には、Worker が自動採番する内部カウンタを使います。同じ内容でも publish 成功ごとに進み、検証失敗時には変わりません。利用者が管理する必要はありません。
 
-この2つは別の役割を持ちます。
+## Table snapshot
 
-**Catalog revision** は catalog 全体の publication 順序を表します。特定 table に関係しない metadata 変更でも、新しい catalog state を publish するなら増加させます。
+Table の `snapshot` は、files が表す bytes と physical schema の identity です。File contents または physical schema が変わったときに変更します。
 
-**Table `snapshot`** は、その table の files が表す bytes と physical schema の identity です。File contents または physical schema が変わったときに変更します。
-
-この2つを分けることで、無関係な catalog 更新によって全 table の DuckDB file / Parquet cache が invalidation されることを防ぎます。
+無関係な catalog 更新では table の `snapshot` を変えないことで、変更のない table の DuckDB file / Parquet cache identity を維持できます。
 
 ## Scanner と file
 

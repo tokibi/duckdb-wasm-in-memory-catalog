@@ -14,7 +14,7 @@ Use this project when your application already has a declarative dataset model a
 ## What it provides
 
 - A read-only DuckDB catalog backed by application-owned metadata.
-- Atomic publication of complete catalog snapshots.
+- Worker-serialized, atomic publication of complete catalog snapshots.
 - Explicit table scanners and file URIs.
 - Table-level snapshot identities for DuckDB file and Parquet cache isolation.
 - A JavaScript controller for lifecycle, publication, diagnostics, and cleanup.
@@ -23,8 +23,8 @@ Use this project when your application already has a declarative dataset model a
 
 1. [Getting started](./getting-started.md) — initialize the runtime and run the first query.
 2. [Guides](./guides.md) — publish, update, query, and operate catalogs.
-3. [Concepts](./concepts.md) — understand revisions, table snapshots, scanners, cache identity, and runtime ownership.
-4. [Reference](./reference.md) — snapshot format, JavaScript API, errors, limitations, and development commands.
+3. [Concepts](./concepts.md) — understand complete snapshots, table snapshots, scanners, cache identity, and runtime ownership.
+4. [Reference](./reference.md) — snapshot format, JavaScript API, errors, migration notes, limitations, and development commands.
 
 The [live demo](../) runs the same catalog implementation in the browser with an editable snapshot and SQL query.
 

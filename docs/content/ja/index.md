@@ -14,7 +14,7 @@ description: アプリケーションが管理するテーブルメタデータ�
 ## 主な機能
 
 - アプリケーション管理のメタデータを読み取り専用 DuckDB カタログとして公開
-- 完全な catalog snapshot の atomic な更新
+- Worker が直列化する、完全な catalog snapshot の atomic な更新
 - scanner と file URI の明示的な定義
 - DuckDB の file / Parquet cache を分離する table 単位の snapshot identity
 - lifecycle、publish、diagnostics、cleanup を扱う JavaScript controller
@@ -23,8 +23,8 @@ description: アプリケーションが管理するテーブルメタデータ�
 
 1. [Getting started](./getting-started.md) でランタイムをセットアップします。
 2. [Guides](./guides.md) で catalog の publish / update 方法を確認します。
-3. アプリケーションへ組み込む前に [Concepts](./concepts.md) で catalog model を理解します。
-4. メタデータ生成時は [Reference](./reference.md) の snapshot format を参照します。
+3. アプリケーションへ組み込む前に [Concepts](./concepts.md) で complete snapshot、table snapshot の関係を理解します。
+4. メタデータ生成時は [Reference](./reference.md) の snapshot format、JavaScript API、migration note を参照します。
 
 [ライブデモ](../../) では、編集可能な snapshot と SQL を使って同じ catalog 実装をブラウザ上で試せます。
 

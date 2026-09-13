@@ -1,13 +1,13 @@
 ---
 title: Reference
-description: Snapshot schema, JavaScript API, errors, and current limitations.
+description: Snapshot schema, JavaScript API, errors, migration notes, and current limitations.
 ---
 
 # Reference
 
 ## Snapshot format
 
-A catalog publication sends a `bigint` revision and one complete snapshot.
+A catalog publication sends one complete snapshot.
 
 ```js
 {
@@ -97,7 +97,6 @@ const catalog = await InMemoryCatalogController.initialize(
   db,
   worker,
   options,
-  initialRevision,
   initialSnapshot,
 )
 ```
@@ -114,23 +113,17 @@ Creates a DuckDB connection, loads Parquet and the catalog extension, opens a Wo
 | `ackTimeoutMs` | no | `5000` | Positive safe-integer timeout for Worker acknowledgements. |
 | `onRecoveryRequired` | no | — | Callback invoked when cleanup becomes uncertain. |
 
-`initialRevision` must be a `bigint` in the unsigned 64-bit range.
-
 ### `catalog.connection`
 
 The DuckDB connection on which the catalog was attached. Use it for catalog queries.
-
-### `catalog.currentRevision`
-
-The most recently published catalog revision after a successful publication.
 
 ### `catalog.state`
 
 Controller lifecycle state. The normal terminal state after successful cleanup is `closed`.
 
-### `catalog.publishSnapshot(revision, snapshot)`
+### `catalog.publishSnapshot(snapshot)`
 
-Publishes a complete replacement snapshot. Operations are serialized in call order.
+Copies the snapshot at call time and publishes it in call order. Successful validation atomically replaces the complete catalog state. The last submitted valid snapshot becomes current. Returns `Promise<void>`.
 
 ### `catalog.diagnostics()`
 
@@ -152,8 +145,13 @@ Important codes include:
 | `RC_REMOTE_IO` | Worker communication failed, timed out, or returned an unexpected result. |
 | `RC_CATALOG_WORKSPACE_CLOSED` | An operation was attempted after the controller stopped accepting work. |
 | `RC_CATALOG_RECOVERY_REQUIRED` | Cleanup failed and the application should recreate the affected runtime. |
+| `RC_METADATA_GENERATION_EXHAUSTED` | The private internal generation reached its limit; reopen the workspace. |
 
 Snapshot validation can return additional catalog-specific codes from the Worker/extension. Treat the error code as the machine-readable value and the message as diagnostic text.
+
+## Migration from revision-based publications
+
+Remove `initialRevision` from `initialize(db, worker, options, initialRevision, initialSnapshot)`, pass only the snapshot to `publishSnapshot(snapshot)`, and remove reads of `catalog.currentRevision`. Keep each table's `snapshot` value for bytes, physical schema, and cache identity. The catalog generation is now private bridge state.
 
 ## Current limitations
 

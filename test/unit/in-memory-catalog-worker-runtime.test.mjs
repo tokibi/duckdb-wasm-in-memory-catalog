@@ -56,7 +56,6 @@ describe('In-Memory Catalog Worker runtime', () => {
     await port.dispatch({
       type: 'IN_MEMORY_CATALOG_REPLACE_SNAPSHOT',
       request_id: 'replace-1',
-      catalog_revision: 1n,
       snapshot: snapshot(),
     })
 
@@ -66,8 +65,6 @@ describe('In-Memory Catalog Worker runtime', () => {
         type: 'IN_MEMORY_CATALOG_REPLACE_SNAPSHOT_RESULT',
         request_id: 'replace-1',
         ok: true,
-        revision: '1',
-        idempotent: false,
       },
     ])
     assert.equal(runtime.bridge.currentRevision('workspace'), '1')
@@ -82,7 +79,7 @@ describe('In-Memory Catalog Worker runtime', () => {
     assert.equal(port.messages.at(-1).diagnostics.full_lookup_count, 1)
   })
 
-  it('drops a MAX_UINT64 workspace before acknowledging and closes the port', async () => {
+  it('drops a published workspace before acknowledging and closes the port', async () => {
     const store = new InMemoryCatalogMetadataStore()
     const runtime = createInMemoryCatalogWorkerRuntime(store)
     const port = new FakePort()
@@ -92,8 +89,7 @@ describe('In-Memory Catalog Worker runtime', () => {
     })
     await port.dispatch({
       type: 'IN_MEMORY_CATALOG_REPLACE_SNAPSHOT',
-      request_id: 'replace-max',
-      catalog_revision: (1n << 64n) - 1n,
+      request_id: 'replace-1',
       snapshot: snapshot(),
     })
 

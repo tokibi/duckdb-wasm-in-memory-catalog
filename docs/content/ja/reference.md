@@ -1,13 +1,13 @@
 ---
 title: Reference
-description: Snapshot schema、JavaScript API、error、現在の制約をまとめます。
+description: Snapshot schema、JavaScript API、error、migration note、現在の制約をまとめます。
 ---
 
 # Reference
 
 ## Snapshot format
 
-Catalog publication では `bigint` revision と catalog 全体の complete snapshot を送ります。
+Catalog publication では catalog 全体の complete snapshot を送ります。
 
 ```js
 {
@@ -97,7 +97,6 @@ const catalog = await InMemoryCatalogController.initialize(
   db,
   worker,
   options,
-  initialRevision,
   initialSnapshot,
 )
 ```
@@ -114,23 +113,17 @@ DuckDB connection を作成し、Parquet と catalog extension をロードし�
 | `ackTimeoutMs` | no | `5000` | Worker acknowledgement を待つ positive safe integer timeout。 |
 | `onRecoveryRequired` | no | — | Cleanup 結果が不確実になった場合に呼ばれる callback。 |
 
-`initialRevision` は unsigned 64-bit range 内の `bigint` である必要があります。
-
 ### `catalog.connection`
 
 Catalog を attach した DuckDB connection です。Catalog を使う query はこの connection から実行します。
-
-### `catalog.currentRevision`
-
-直近で publish に成功した catalog revision です。
 
 ### `catalog.state`
 
 Controller の lifecycle state です。正常に cleanup された場合の terminal state は `closed` です。
 
-### `catalog.publishSnapshot(revision, snapshot)`
+### `catalog.publishSnapshot(snapshot)`
 
-Catalog 全体を置き換える complete snapshot を publish します。Operation は呼び出し順に直列化されます。
+呼び出し時の snapshot を複製し、呼び出し順に publish します。検証に成功すると catalog 全体を一括置換します。最後に渡された有効な snapshot が現在の状態になります。戻り値は `Promise<void>` です。
 
 ### `catalog.diagnostics()`
 
@@ -152,8 +145,13 @@ Controller failure は `InMemoryCatalogControllerError` として throw され�
 | `RC_REMOTE_IO` | Worker communication の失敗、timeout、想定外 response。 |
 | `RC_CATALOG_WORKSPACE_CLOSED` | Controller が operation を受け付けなくなった後に呼び出した。 |
 | `RC_CATALOG_RECOVERY_REQUIRED` | Cleanup に失敗し、対象 runtime の再作成が必要。 |
+| `RC_METADATA_GENERATION_EXHAUSTED` | Private な internal generation の上限に達した。Workspace を再作成する必要がある。 |
 
 Snapshot validation では Worker / extension から追加の catalog-specific code が返ることがあります。分岐には error code を使い、message は診断情報として扱ってください。
+
+## Revision-based publication からの移行
+
+`initialize(db, worker, options, initialRevision, initialSnapshot)` から `initialRevision` を削除し、`publishSnapshot(snapshot)` には snapshot だけを渡してください。`catalog.currentRevision` の参照も削除します。Bytes、physical schema、cache identity のために各 table の `snapshot` は引き続き管理します。Catalog generation は private な bridge state です。
 
 ## 現在の制約
 

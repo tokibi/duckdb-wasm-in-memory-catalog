@@ -72,15 +72,11 @@
     const requestId = message?.request_id
     if (message?.type === REPLACE_SNAPSHOT) {
       try {
-        const result = await session.replaceCatalogSnapshot(
-          message.catalog_revision,
-          message.snapshot,
-        )
+        await session.replaceCatalogSnapshot(message.snapshot)
         port.postMessage({
           type: 'IN_MEMORY_CATALOG_REPLACE_SNAPSHOT_RESULT',
           request_id: requestId,
           ok: true,
-          ...result,
         })
       } catch (error) {
         port.postMessage({
