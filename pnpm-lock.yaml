@@ -11,6 +11,15 @@ importers:
       '@duckdb/duckdb-wasm':
         specifier: 1.32.0
         version: 1.32.0
+      apache-arrow:
+        specifier: 17.0.0
+        version: 17.0.0
+      flatbuffers:
+        specifier: 24.12.23
+        version: 24.12.23
+      tslib:
+        specifier: 2.8.1
+        version: 2.8.1
 
   docs:
     devDependencies:
