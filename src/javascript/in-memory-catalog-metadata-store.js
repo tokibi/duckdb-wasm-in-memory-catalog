@@ -69,6 +69,78 @@
         return operation
       }
 
+      const replaceCatalogTable = (schemaName, table) => {
+        if (record.closing) return Promise.reject(closedWorkspaceError())
+        let normalizedSchemaName
+        let candidate
+        try {
+          normalizedSchemaName = requireName(schemaName, 'schema_name')
+          // Capture and validate only the submitted table before waiting for
+          // earlier queued publications. Target lookup happens in the queued
+          // operation so mixed full and table replacements observe order.
+          candidate = normalizeTable(table, 'table', new Set())
+        } catch (error) {
+          return Promise.reject(error)
+        }
+        const operation = record.pending.then(() => {
+          const current = record.current
+          const schema = current?.schemas.get(indexKey(normalizedSchemaName))
+          if (!schema) {
+            throw new InMemoryCatalogError(
+              'RC_CATALOG_SCHEMA_NOT_FOUND',
+              `Catalog schema ${normalizedSchemaName} was not found`,
+            )
+          }
+
+          const tableKey = indexKey(candidate.name)
+          const previousTable = schema.tables.get(tableKey)
+          if (!previousTable) {
+            throw new InMemoryCatalogError(
+              'RC_CATALOG_TABLE_NOT_FOUND',
+              `Catalog table ${normalizedSchemaName}.${candidate.name} was not found`,
+            )
+          }
+
+          // A case-insensitive table match addresses the existing table. Keep
+          // its published spelling while replacing its validated contents.
+          const replacement = deepFreeze({ ...candidate, name: previousTable.name })
+          const tables = schema.metadata.tables.slice()
+          tables[schema.tablePositions.get(tableKey)] = replacement
+          const metadata = deepFreeze({ name: schema.metadata.name, tables })
+          const tableIndex = new Map(schema.tables)
+          tableIndex.set(tableKey, replacement)
+          const replacementSchema = Object.freeze({
+            metadata,
+            tables: tableIndex,
+            tablePositions: schema.tablePositions,
+          })
+
+          const schemas = current.snapshot.schemas.slice()
+          schemas[current.schemaPositions.get(indexKey(schema.metadata.name))] = metadata
+          const snapshot = deepFreeze({ format_version: 2, schemas })
+          const schemaIndex = new Map(current.schemas)
+          schemaIndex.set(indexKey(schema.metadata.name), replacementSchema)
+
+          // Internal generation: DuckDB cache invalidation and bridge consistency only.
+          // Application state ordering follows publication order, not this counter.
+          const revision = (current.revision ?? 0n) + 1n
+          if (revision > MAX_UINT64) {
+            throw new InMemoryCatalogError(
+              'RC_METADATA_GENERATION_EXHAUSTED',
+              'Catalog internal generation is exhausted; reopen the workspace',
+            )
+          }
+          record.current = Object.freeze({
+            revision,
+            snapshot,
+            schemas: schemaIndex,
+            schemaPositions: current.schemaPositions,
+          })
+        })
+        record.pending = operation.catch(() => {})
+        return operation
+      }
+
       const dropCatalogWorkspace = () => {
         if (record.closing) return Promise.reject(closedWorkspaceError())
         record.closing = true
@@ -83,6 +155,7 @@
 
       return Object.freeze({
         replaceCatalogSnapshot,
+        replaceCatalogTable,
         dropCatalogWorkspace,
         diagnostics: () => this.diagnostics(),
       })
@@ -170,6 +243,7 @@
 
       const tableNames = new Set()
       const tableIndex = new Map()
+      const tablePositions = new Map()
       const tables = schema.tables.map((table, tableIndexValue) => {
         const normalized = normalizeTable(
           table,
@@ -177,16 +251,26 @@
           tableNames,
         )
         tableIndex.set(indexKey(normalized.name), normalized)
+        tablePositions.set(indexKey(normalized.name), tableIndexValue)
         return normalized
       })
       const metadata = deepFreeze({ name, tables })
-      schemaIndex.set(indexKey(name), Object.freeze({ metadata, tables: tableIndex }))
+      schemaIndex.set(indexKey(name), Object.freeze({
+        metadata,
+        tables: tableIndex,
+        tablePositions,
+      }))
       return metadata
     })
+
+    const schemaPositions = new Map(
+      normalizedSchemas.map((schema, schemaIndexValue) => [indexKey(schema.name), schemaIndexValue]),
+    )
 
     return {
       snapshot: deepFreeze({ format_version: 2, schemas: normalizedSchemas }),
       schemas: schemaIndex,
+      schemaPositions,
     }
   }
 

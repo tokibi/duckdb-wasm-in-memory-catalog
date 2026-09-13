@@ -115,6 +115,51 @@ describe('InMemoryCatalogController', () => {
     }
   })
 
+  it('replaces one table through the dedicated worker operation and captures input before queueing', async () => {
+    const store = new InMemoryCatalogMetadataStore()
+    const worker = runtimeWorker(createInMemoryCatalogWorkerRuntime(store))
+    const { db } = fakeDatabase()
+    const controller = await InMemoryCatalogController.initialize(
+      db,
+      worker,
+      { workspaceId: 'workspace', catalogName: 'dataset', ackTimeoutMs: 100 },
+      snapshot(),
+    )
+
+    try {
+      const candidate = snapshot('https://example.test/table-update').schemas[0].tables[0]
+      candidate.snapshot = 'snapshot-update'
+      const firstFull = snapshot('https://example.test/full-update')
+      firstFull.schemas[0].tables[0].snapshot = 'snapshot-full-update'
+      const fullPublication = controller.publishSnapshot(firstFull)
+      const replacement = controller.replaceTable('MAIN', candidate)
+      candidate.snapshot = 'mutated-after-submit'
+      candidate.files[0].uri = 'https://example.test/mutated-after-submit'
+      await Promise.all([fullPublication, replacement])
+
+      assert.equal(store.currentRevision('workspace'), 3n)
+      const updated = store.lookupTable('workspace', '3', 'main', 'table1')
+      assert.equal(updated.snapshot, 'snapshot-update')
+      assert.equal(updated.files[0].uri, 'https://example.test/table-update')
+
+      const replacementBeforeFull = snapshot('https://example.test/table-before-full')
+        .schemas[0].tables[0]
+      replacementBeforeFull.snapshot = 'snapshot-before-full'
+      const secondReplacement = controller.replaceTable('main', replacementBeforeFull)
+      const finalFull = snapshot('https://example.test/final-full')
+      finalFull.schemas[0].tables[0].snapshot = 'snapshot-final-full'
+      const finalPublication = controller.publishSnapshot(finalFull)
+      await Promise.all([secondReplacement, finalPublication])
+
+      assert.equal(store.currentRevision('workspace'), 5n)
+      const finalTable = store.lookupTable('workspace', '5', 'main', 'table1')
+      assert.equal(finalTable.snapshot, 'snapshot-final-full')
+      assert.equal(finalTable.files[0].uri, 'https://example.test/final-full')
+    } finally {
+      await controller.close()
+    }
+  })
+
   it('closes successfully after publication', async () => {
     const store = new InMemoryCatalogMetadataStore()
     const worker = runtimeWorker(createInMemoryCatalogWorkerRuntime(store))

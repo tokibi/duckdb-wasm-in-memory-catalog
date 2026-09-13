@@ -12,7 +12,7 @@ In-memory catalog は、ホストアプリケーションが管理するメタ�
 ```text
 application state
       │
-      │ complete snapshot
+      │ catalog snapshot / table replacement
       ▼
 Catalog controller
       │
@@ -30,11 +30,11 @@ DuckDB-Wasm
 
 Authority は常にアプリケーション側にあります。DuckDB からは schema、table、column が通常の catalog object として見えますが、その定義を DuckDB が所有するわけではありません。
 
-## Complete snapshot
+## Catalog の更新
 
-各 publication は catalog 全体の完全 snapshot を含みます。Controller は呼び出し時の内容を複製し、呼び出し順に Worker へ送ります。Worker は検証に成功した snapshot で現在の状態を一括置換します。検証に失敗しても現在の状態は変わりません。
+`publishSnapshot()` は catalog 全体の完全 snapshot を渡し、`replaceTable()` は既存の単一テーブルの完全な定義を渡します。Controller は呼び出し時の内容を複製し、呼び出し順に Worker へ送ります。Worker は受け取ったメタデータを検証してから、現在の状態を原子的に更新します。検証に失敗しても現在の状態は変わりません。
 
-最後に渡された有効な snapshot が現在の状態になります。非同期処理で古い結果が遅れて届く場合は、アプリケーション側で publish 前に除外してください。
+成功した更新は呼び出し順に反映されます。全体置換はすべての状態を置き換え、単一テーブルの置換は他のテーブルを維持します。非同期処理で古い結果が遅れて届く場合は、アプリケーション側で publish 前に除外してください。
 
 DuckDB のメタデータ更新検知と読み取り時の世代照合には、Worker が自動採番する内部カウンタを使います。同じ内容でも publish 成功ごとに進み、検証失敗時には変わりません。利用者が管理する必要はありません。
 
@@ -95,4 +95,4 @@ DuckDB Worker と database の lifecycle はホストアプリケーションが
 
 Catalog mutation は意図的にサポートしていません。DuckDB 側の DDL を許すと、アプリケーションの data model と DuckDB catalog の2つが source of truth になってしまいます。
 
-Dataset を変更するときはアプリケーション状態を更新し、新しい完全 snapshot を publish してください。
+Dataset を変更するときはアプリケーション状態を更新し、`publishSnapshot()` または `replaceTable()` で反映してください。

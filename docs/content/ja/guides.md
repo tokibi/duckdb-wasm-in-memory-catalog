@@ -45,6 +45,24 @@ Controller は呼び出し時の内容を複製し、呼び出し順に publish 
 
 各 table の `snapshot` は、その table の bytes または physical Parquet schema が変わったときだけ変更します。
 
+## 単一テーブルを更新する
+
+既存のテーブルだけを更新する場合は、そのテーブルの完全な定義を渡します。
+
+```js
+await catalog.replaceTable('main', {
+  name: 'events',
+  snapshot: 'events-v2',
+  columns: nextColumns,
+  scanner: { type: 'parquet', options: {} },
+  files: nextFiles,
+})
+```
+
+Schema 名と table の `name` で対象を特定します。対象が存在しない場合はエラーになります。他のテーブルは再送・再検証せず、そのまま維持します。
+
+`publishSnapshot()` と `replaceTable()` は共通のキューで呼び出し順に処理します。対象は処理時点のカタログから探します。後から全体置換すると、それ以前のテーブル更新も含めて置き換わります。検証に失敗しても現在の状態は変わらず、次の更新を続けられます。
+
 ## Catalog を query する
 
 通常の DuckDB と同じく catalog / schema / table で参照できます。

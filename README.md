@@ -4,7 +4,7 @@ Publish application-owned table metadata as a read-only DuckDB catalog in the br
 
 [**Live demo**](https://tokibi.github.io/duckdb-wasm-in-memory-catalog/) · [**Documentation**](https://tokibi.github.io/duckdb-wasm-in-memory-catalog/docs/) · [**日本語ドキュメント**](https://tokibi.github.io/duckdb-wasm-in-memory-catalog/docs/ja/) · [MIT License](LICENSE)
 
-The host application supplies complete schema, table, column, scanner, and file metadata. A Dedicated Worker validates each complete snapshot, atomically replaces its catalog state, and exposes table descriptors to the `in_memory_catalog` Wasm extension on demand.
+The host application supplies complete schema, table, column, scanner, and file metadata. A Dedicated Worker validates complete catalog snapshots or individual table replacements, atomically updates its catalog state, and exposes table descriptors to the `in_memory_catalog` Wasm extension on demand.
 
 Use it when your application already owns a declarative dataset model and you want DuckDB-Wasm to query that model as a normal catalog instead of synchronizing it through procedural DDL.
 
@@ -19,7 +19,7 @@ flowchart LR
     Extension[in_memory_catalog extension]
     Worker[Catalog metadata store]
   end
-  App -->|complete snapshot| Controller
+  App -->|catalog snapshot or table replacement| Controller
   Controller -->|MessageChannel| Worker
   DuckDB --> Extension
   Extension -->|table lookup| Worker

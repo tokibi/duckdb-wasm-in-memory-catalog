@@ -24,6 +24,37 @@ function snapshot(uri = 'https://example.test/table') {
   }
 }
 
+function table(name, snapshotId, uri) {
+  return {
+    name,
+    snapshot: snapshotId,
+    scanner: { type: 'parquet', options: {} },
+    columns: [{ name: 'id', type: 'BIGINT', nullable: false }],
+    files: [{ uri }],
+  }
+}
+
+function multiTableSnapshot(suffix = 'initial') {
+  return {
+    format_version: 2,
+    schemas: [
+      {
+        name: 'main',
+        tables: [
+          table('table1', `${suffix}-table1`, `https://example.test/${suffix}-table1`),
+          table('table2', `${suffix}-table2`, `https://example.test/${suffix}-table2`),
+        ],
+      },
+      {
+        name: 'archive',
+        tables: [
+          table('events', `${suffix}-events`, `https://example.test/${suffix}-events`),
+        ],
+      },
+    ],
+  }
+}
+
 async function expectCode(operation, code) {
   await assert.rejects(operation, (error) => {
     assert.ok(error instanceof InMemoryCatalogError)
@@ -33,6 +64,74 @@ async function expectCode(operation, code) {
 }
 
 describe('InMemoryCatalogMetadataStore', () => {
+  it('orders mixed full and table replacements and preserves unrelated table objects', async () => {
+    const store = new InMemoryCatalogMetadataStore()
+    const session = store.openWorkspaceSession('workspace')
+
+    await session.replaceCatalogSnapshot(multiTableSnapshot())
+    const nextSnapshot = multiTableSnapshot('full')
+    nextSnapshot.schemas[0].name = 'MAIN'
+    const full = session.replaceCatalogSnapshot(nextSnapshot)
+    const replacement = table('TABLE1', 'table-update', 'https://example.test/table-update')
+    replacement.columns.push({ name: 'value', type: 'VARCHAR', nullable: true })
+    const partial = session.replaceCatalogTable('main', replacement)
+    await Promise.all([full, partial])
+
+    assert.equal(store.currentRevision('workspace'), 3n)
+    const updatedTable1 = store.lookupTable('workspace', '3', 'main', 'table1')
+    assert.equal(updatedTable1.name, 'table1')
+    assert.equal(updatedTable1.snapshot, 'table-update')
+    assert.equal(updatedTable1.files[0].uri, 'https://example.test/table-update')
+    assert.deepEqual(
+      store.listTables('workspace', '3', 'main').find((entry) => entry.name === 'table1').columns,
+      [
+        { name: 'id', type: 'BIGINT', nullable: false },
+        { name: 'value', type: 'VARCHAR', nullable: true },
+      ],
+    )
+    assert.equal(store.listSchemas('workspace', '3')[0], 'MAIN')
+
+    const preservedTable2 = store.lookupTable('workspace', '3', 'main', 'table2')
+    const preservedArchive = store.lookupTable('workspace', '3', 'archive', 'events')
+    await session.replaceCatalogTable(
+      'main',
+      table('TABLE1', 'table-update-again', 'https://example.test/table-update-again'),
+    )
+    assert.equal(store.lookupTable('workspace', '4', 'main', 'table2'), preservedTable2)
+    assert.equal(store.lookupTable('workspace', '4', 'archive', 'events'), preservedArchive)
+  })
+
+  it('resolves missing targets at execution, retains state after errors, and captures table input', async () => {
+    const store = new InMemoryCatalogMetadataStore()
+    const session = store.openWorkspaceSession('workspace')
+    await session.replaceCatalogSnapshot(multiTableSnapshot())
+    const original = store.lookupTable('workspace', '1', 'main', 'table1')
+
+    await expectCode(
+      () => session.replaceCatalogTable('missing', table('table1', 'missing', 'https://example.test/missing')),
+      'RC_CATALOG_SCHEMA_NOT_FOUND',
+    )
+    await expectCode(
+      () => session.replaceCatalogTable('main', table('missing', 'missing', 'https://example.test/missing')),
+      'RC_CATALOG_TABLE_NOT_FOUND',
+    )
+    const invalid = table('TABLE1', 'invalid', 'https://example.test/invalid')
+    invalid.files = []
+    await expectCode(() => session.replaceCatalogTable('MAIN', invalid), 'RC_METADATA_INVALID')
+    assert.equal(store.currentRevision('workspace'), 1n)
+    assert.equal(store.lookupTable('workspace', '1', 'main', 'table1'), original)
+
+    const candidate = table('TaBlE1', 'captured', 'https://example.test/captured')
+    const update = session.replaceCatalogTable('MAIN', candidate)
+    candidate.snapshot = 'mutated-after-submit'
+    candidate.files[0].uri = 'https://example.test/mutated-after-submit'
+    await update
+    assert.equal(store.currentRevision('workspace'), 2n)
+    const captured = store.lookupTable('workspace', '2', 'main', 'table1')
+    assert.equal(captured.snapshot, 'captured')
+    assert.equal(captured.files[0].uri, 'https://example.test/captured')
+  })
+
   it('publishes scanner and URI metadata while keeping enumeration descriptors lightweight', async () => {
     const store = new InMemoryCatalogMetadataStore()
     const session = store.openWorkspaceSession('workspace')

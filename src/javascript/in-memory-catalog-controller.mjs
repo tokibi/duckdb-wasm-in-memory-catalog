@@ -96,6 +96,40 @@ export class InMemoryCatalogController {
     return operation
   }
 
+  replaceTable(schemaName, table) {
+    if (this.#state !== 'active') {
+      return Promise.reject(new InMemoryCatalogControllerError(
+        'RC_CATALOG_WORKSPACE_CLOSED',
+        'In-Memory Catalog workspace controller is closed',
+      ))
+    }
+    let submittedSchemaName
+    try {
+      submittedSchemaName = requireName(schemaName, 'schemaName')
+    } catch (error) {
+      return Promise.reject(error)
+    }
+    let submittedTable
+    try {
+      submittedTable = structuredClone(table)
+    } catch {
+      return Promise.reject(new InMemoryCatalogControllerError(
+        'RC_METADATA_INVALID',
+        'Catalog table must be structured-cloneable',
+      ))
+    }
+    const operation = this.#pending.then(async () => {
+      const result = await this.#session.request(
+        'IN_MEMORY_CATALOG_REPLACE_TABLE',
+        'IN_MEMORY_CATALOG_REPLACE_TABLE_RESULT',
+        { schema_name: submittedSchemaName, table: submittedTable },
+      )
+      requireSuccessfulResult(result, 'Catalog table replacement failed')
+    })
+    this.#pending = operation.catch(() => {})
+    return operation
+  }
+
   diagnostics() {
     if (this.#state !== 'active') {
       return Promise.reject(new InMemoryCatalogControllerError(
