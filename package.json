@@ -19,6 +19,9 @@
     "serve:pages": "node scripts/serve-pages.mjs"
   },
   "dependencies": {
-    "@duckdb/duckdb-wasm": "1.32.0"
+    "@duckdb/duckdb-wasm": "1.32.0",
+    "apache-arrow": "17.0.0",
+    "flatbuffers": "24.12.23",
+    "tslib": "2.8.1"
   }
 }
