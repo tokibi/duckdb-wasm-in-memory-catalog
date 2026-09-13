@@ -125,6 +125,12 @@ Controller lifecycle state. The normal terminal state after successful cleanup i
 
 Copies the snapshot at call time and publishes it in call order. Successful validation atomically replaces the complete catalog state. The last submitted valid snapshot becomes current. Returns `Promise<void>`.
 
+### `catalog.replaceTable(schemaName, table)`
+
+Replaces the complete definition of an existing table. `table` uses the same format as a table in a snapshot, requiring `name`, `snapshot`, `columns`, `scanner`, and `files`. Schema and table names are matched case-insensitively, preserving their existing spelling. Use `publishSnapshot()` to add, remove, or rename tables.
+
+Input is copied at call time and processed in the same queue as complete publications. Success atomically updates the target table and advances the internal generation. Returns `Promise<void>`.
+
 ### `catalog.diagnostics()`
 
 Returns Worker-side catalog diagnostics after prior queued operations complete.
@@ -142,6 +148,8 @@ Important codes include:
 | Code | Meaning |
 | --- | --- |
 | `RC_METADATA_INVALID` | Invalid controller input or catalog metadata. |
+| `RC_CATALOG_SCHEMA_NOT_FOUND` | The schema targeted by a table replacement does not exist. |
+| `RC_CATALOG_TABLE_NOT_FOUND` | The table targeted by a table replacement does not exist. |
 | `RC_REMOTE_IO` | Worker communication failed, timed out, or returned an unexpected result. |
 | `RC_CATALOG_WORKSPACE_CLOSED` | An operation was attempted after the controller stopped accepting work. |
 | `RC_CATALOG_RECOVERY_REQUIRED` | Cleanup failed and the application should recreate the affected runtime. |

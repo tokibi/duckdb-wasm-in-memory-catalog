@@ -125,6 +125,12 @@ Controller の lifecycle state です。正常に cleanup された場合の ter
 
 呼び出し時の snapshot を複製し、呼び出し順に publish します。検証に成功すると catalog 全体を一括置換します。最後に渡された有効な snapshot が現在の状態になります。戻り値は `Promise<void>` です。
 
+### `catalog.replaceTable(schemaName, table)`
+
+既存テーブルの定義全体を置換します。`table` は snapshot 内の table と同じ形式で、`name`、`snapshot`、`columns`、`scanner`、`files` が必要です。Schema 名と table 名は大文字・小文字を区別せずに照合し、既存の表記を維持します。追加・削除・名前変更には `publishSnapshot()` を使ってください。
+
+入力は呼び出し時に複製され、全体置換と共通のキューで処理されます。成功すると対象テーブルだけを原子的に更新し、内部世代を進めます。戻り値は `Promise<void>` です。
+
 ### `catalog.diagnostics()`
 
 それ以前に queue された operation の完了後、Worker-side catalog diagnostics を返します。
@@ -142,6 +148,8 @@ Controller failure は `InMemoryCatalogControllerError` として throw され�
 | Code | 意味 |
 | --- | --- |
 | `RC_METADATA_INVALID` | Controller input または catalog metadata が不正。 |
+| `RC_CATALOG_SCHEMA_NOT_FOUND` | 単一テーブル更新の対象 schema が存在しない。 |
+| `RC_CATALOG_TABLE_NOT_FOUND` | 単一テーブル更新の対象 table が存在しない。 |
 | `RC_REMOTE_IO` | Worker communication の失敗、timeout、想定外 response。 |
 | `RC_CATALOG_WORKSPACE_CLOSED` | Controller が operation を受け付けなくなった後に呼び出した。 |
 | `RC_CATALOG_RECOVERY_REQUIRED` | Cleanup に失敗し、対象 runtime の再作成が必要。 |

@@ -79,6 +79,42 @@ describe('In-Memory Catalog Worker runtime', () => {
     assert.equal(port.messages.at(-1).diagnostics.full_lookup_count, 1)
   })
 
+  it('acknowledges a dedicated table replacement without exposing a revision', async () => {
+    const store = new InMemoryCatalogMetadataStore()
+    const runtime = createInMemoryCatalogWorkerRuntime(store)
+    const port = new FakePort()
+    await runtime.handleMessage({
+      data: { type: 'IN_MEMORY_CATALOG_OPEN_WORKSPACE_SESSION', workspace_id: 'workspace' },
+      ports: [port],
+    })
+    await port.dispatch({
+      type: 'IN_MEMORY_CATALOG_REPLACE_SNAPSHOT',
+      request_id: 'replace-1',
+      snapshot: snapshot(),
+    })
+
+    const replacement = snapshot('https://example.test/table-update').schemas[0].tables[0]
+    replacement.snapshot = 'snapshot-update'
+    await port.dispatch({
+      type: 'IN_MEMORY_CATALOG_REPLACE_TABLE',
+      request_id: 'replace-table-1',
+      schema_name: 'MAIN',
+      table: replacement,
+    })
+
+    assert.deepEqual(port.messages.at(-1), {
+      type: 'IN_MEMORY_CATALOG_REPLACE_TABLE_RESULT',
+      request_id: 'replace-table-1',
+      ok: true,
+    })
+    assert.equal('revision' in port.messages.at(-1), false)
+    assert.equal(runtime.bridge.currentRevision('workspace'), '2')
+    assert.equal(
+      JSON.parse(runtime.bridge.lookupTable('workspace', '2', 'main', 'table1')).snapshot,
+      'snapshot-update',
+    )
+  })
+
   it('drops a published workspace before acknowledging and closes the port', async () => {
     const store = new InMemoryCatalogMetadataStore()
     const runtime = createInMemoryCatalogWorkerRuntime(store)

@@ -3,6 +3,7 @@
 
   const OPEN_SESSION = 'IN_MEMORY_CATALOG_OPEN_WORKSPACE_SESSION'
   const REPLACE_SNAPSHOT = 'IN_MEMORY_CATALOG_REPLACE_SNAPSHOT'
+  const REPLACE_TABLE = 'IN_MEMORY_CATALOG_REPLACE_TABLE'
   const DROP_WORKSPACE = 'IN_MEMORY_CATALOG_DROP_WORKSPACE'
   const GET_DIAGNOSTICS = 'IN_MEMORY_CATALOG_GET_DIAGNOSTICS'
 
@@ -81,6 +82,26 @@
       } catch (error) {
         port.postMessage({
           type: 'IN_MEMORY_CATALOG_REPLACE_SNAPSHOT_RESULT',
+          request_id: requestId,
+          ok: false,
+          code: errorCode(error),
+          message: safeOperationErrorMessage(error),
+        })
+      }
+      return
+    }
+
+    if (message?.type === REPLACE_TABLE) {
+      try {
+        await session.replaceCatalogTable(message.schema_name, message.table)
+        port.postMessage({
+          type: 'IN_MEMORY_CATALOG_REPLACE_TABLE_RESULT',
+          request_id: requestId,
+          ok: true,
+        })
+      } catch (error) {
+        port.postMessage({
+          type: 'IN_MEMORY_CATALOG_REPLACE_TABLE_RESULT',
           request_id: requestId,
           ok: false,
           code: errorCode(error),

@@ -12,7 +12,7 @@ The in-memory catalog is a read-only projection of metadata owned by the host ap
 ```text
 application state
       │
-      │ complete snapshot
+      │ catalog snapshot / table replacement
       ▼
 Catalog controller
       │
@@ -30,11 +30,11 @@ DuckDB-Wasm
 
 The application remains authoritative. DuckDB sees schemas, tables, and columns as normal catalog objects, but it does not own their definition.
 
-## Complete snapshots
+## Catalog updates
 
-Each publication contains the complete catalog state. The controller copies the input at call time and sends publications to the Worker in call order. The Worker validates the entire snapshot before atomically replacing the current state. Failed validation leaves the current state unchanged.
+`publishSnapshot()` submits the complete catalog state; `replaceTable()` submits only one existing table’s complete definition. The controller copies the input at call time and sends publications to the Worker in call order. The Worker validates the submitted metadata before atomically updating the current state. Failed validation leaves the current state unchanged.
 
-The last submitted valid snapshot becomes current. If asynchronous application work produces snapshots out of order, discard stale results before publishing them.
+Successful operations update the catalog in call order. A complete publication replaces the entire state; a table replacement preserves other tables. If asynchronous application work produces snapshots out of order, discard stale results before publishing them.
 
 The Worker automatically maintains an internal counter for DuckDB metadata invalidation and generation checks during reads. Every successful publication advances it, including identical content; failed validation does not. Applications do not manage this counter.
 
@@ -93,6 +93,6 @@ The host owns the DuckDB Worker and database lifecycle. The controller owns only
 
 ## Read-only by design
 
-Catalog mutation is intentionally unsupported. Allowing DuckDB-side DDL to diverge from the application's model would create two competing sources of truth.
+DuckDB-side catalog mutation is intentionally unsupported. Allowing DuckDB-side DDL to diverge from the application's model would create two competing sources of truth.
 
-When the application changes a dataset, update the application state and publish a new complete catalog snapshot instead.
+When the application changes a dataset, update the application state and submit it with `publishSnapshot()` or `replaceTable()`.

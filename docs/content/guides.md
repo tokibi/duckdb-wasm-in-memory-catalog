@@ -45,6 +45,24 @@ The controller copies the input at call time and publishes snapshots in call ord
 
 Change each table's `snapshot` only when that table's bytes or physical Parquet schema changes.
 
+## Update one table
+
+To update an existing table, submit its complete definition:
+
+```js
+await catalog.replaceTable('main', {
+  name: 'events',
+  snapshot: 'events-v2',
+  columns: nextColumns,
+  scanner: { type: 'parquet', options: {} },
+  files: nextFiles,
+})
+```
+
+The schema name and table's `name` identify the target. A missing target is an error. Other tables remain unchanged and are neither retransmitted nor revalidated.
+
+`publishSnapshot()` and `replaceTable()` share a queue and run in call order. The target is resolved against the catalog when the operation runs. A later complete publication replaces the entire catalog, including earlier table updates. Failed validation preserves the current state and allows subsequent updates to continue.
+
 ## Query a catalog
 
 Tables are addressed with normal DuckDB catalog, schema, and table qualification:
