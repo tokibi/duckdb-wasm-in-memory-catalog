@@ -129,7 +129,7 @@ extension: {
 }
 ```
 
-Extension binary は、アプリケーションが選択した DuckDB-Wasm version と `wasm_eh` platform に一致する必要があります。Catalog package がアプリケーションの DuckDB-Wasm dependency を選択することはありません。Repository URL は DuckDB にそのまま渡されるため、利用する DuckDB-Wasm build が期待する repository layout と version/platform 解決を提供する必要があります。
+Extension binary は、アプリケーションが選択した DuckDB-Wasm version と `wasm_eh` platform に一致する必要があります。DuckDB-Wasm dependency と classic Worker URL はアプリケーションが用意します。Repository URL は DuckDB にそのまま渡されるため、利用する DuckDB-Wasm build が期待する repository layout と version/platform 解決を提供する必要があります。
 
 ### `createInMemoryCatalogWorker()`
 
@@ -192,8 +192,8 @@ Snapshot validation では Worker / extension から追加の catalog-specific c
 ## 現在の制約
 
 - Public API は experimental。
-- DuckDB-Wasm version はホストが選択しますが、対応する `wasm_eh` catalog extension binary を用意する必要があります。
-- Extension build の再現性のため、`versions.lock` には DuckDB commit と Emscripten の pin が残っています。これはリポジトリ自身の build 用であり、ホストアプリケーションに runtime dependency として強制されるものではありません。
+- ホストアプリケーションは DuckDB-Wasm version と、それに対応する `wasm_eh` catalog extension binary を用意する必要があります。
+- Extension build では、`versions.lock` に指定された DuckDB commit と Emscripten version を使用します。これはホストアプリケーションが選択する DuckDB-Wasm version とは別の build input です。
 - Read-only catalog。DuckDB 側からの catalog mutation は拒否される。
 - `format_version: 2` のみ。
 - Scanner は Parquet のみ。

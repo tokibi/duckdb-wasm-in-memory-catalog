@@ -12,7 +12,7 @@ This guide shows the shortest path from a DuckDB-Wasm database to a queryable in
 
 ## 1. Prepare the browser assets
 
-The catalog needs a custom Worker wrapper around the classic DuckDB-Wasm Worker. The catalog does not select or bundle a DuckDB-Wasm version: you provide the classic Worker URL that belongs to the DuckDB-Wasm bundle you selected. The wrapper loads that Worker script into the same Dedicated Worker so the catalog extension can synchronously access its metadata bridge.
+The catalog needs a custom Worker wrapper around the classic DuckDB-Wasm Worker. Provide the classic Worker URL belonging to the DuckDB-Wasm bundle selected by your application. The wrapper loads that Worker script into the same Dedicated Worker so the catalog extension can synchronously access its metadata bridge.
 
 Serve these assets from your application:
 
@@ -27,7 +27,7 @@ Serve these assets from your application:
 /extension/in_memory_catalog.duckdb_extension.wasm
 ```
 
-The `duckdb` files can come from any compatible `@duckdb/duckdb-wasm` version. The catalog extension must have been built for that DuckDB version and for the `wasm_eh` platform. The repository's `scripts/build-pages.mjs` shows one concrete way to assemble the assets.
+The `duckdb` files must come from a compatible `@duckdb/duckdb-wasm` version, and the catalog extension must be built for that DuckDB version and the `wasm_eh` platform. The repository's `scripts/build-pages.mjs` shows one concrete way to assemble the assets.
 
 ## 2. Create DuckDB-Wasm with the catalog Worker
 

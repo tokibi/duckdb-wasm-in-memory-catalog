@@ -12,7 +12,7 @@ DuckDB-Wasm の database から in-memory catalog をクエリできる状態ま
 
 ## 1. Browser asset を準備する
 
-Catalog は DuckDB-Wasm の classic Worker を包む custom Worker wrapper を必要とします。Catalog 側で DuckDB-Wasm のバージョンを選択・同梱することはありません。利用する DuckDB-Wasm bundle に対応する classic Worker URL を渡します。wrapper はその Worker script を同じ Dedicated Worker 内で読み込むため、catalog extension から metadata bridge に同期アクセスできます。
+Catalog は DuckDB-Wasm の classic Worker を包む custom Worker wrapper を必要とします。アプリケーションが選択した DuckDB-Wasm bundle に対応する classic Worker URL を指定します。wrapper はその Worker script を同じ Dedicated Worker 内で読み込むため、catalog extension から metadata bridge に同期アクセスできます。
 
 アプリケーションから次の asset を配信します。
 
@@ -27,7 +27,7 @@ Catalog は DuckDB-Wasm の classic Worker を包む custom Worker wrapper を�
 /extension/in_memory_catalog.duckdb_extension.wasm
 ```
 
-`duckdb` のファイルは、互換性のある任意の `@duckdb/duckdb-wasm` version から用意できます。ただし catalog extension は、その DuckDB version と `wasm_eh` platform 向けに build されている必要があります。具体的な配置方法は、このリポジトリの `scripts/build-pages.mjs` を参考にできます。
+`duckdb` のファイルは、互換性のある `@duckdb/duckdb-wasm` version から用意し、catalog extension はその DuckDB version と `wasm_eh` platform 向けに build します。具体的な配置方法は、このリポジトリの `scripts/build-pages.mjs` を参考にできます。
 
 ## 2. Catalog Worker で DuckDB-Wasm を作成する
 

@@ -6,7 +6,7 @@ Publish application-owned table metadata as a read-only DuckDB catalog in the br
 
 The host application supplies complete schema, table, column, scanner, and file metadata. A Dedicated Worker validates complete catalog snapshots or individual table replacements, atomically updates its catalog state, and exposes table descriptors to the `in_memory_catalog` Wasm extension on demand.
 
-The host application chooses its own DuckDB-Wasm version and classic Worker. Use `createInMemoryCatalogWorker({ duckdbWorker })` to wrap that Worker; the catalog package does not impose a runtime DuckDB-Wasm dependency. The catalog extension still needs a binary built for the selected DuckDB-Wasm version and the currently supported `wasm_eh` platform. The DuckDB commit and Emscripten pins in `versions.lock` are retained for reproducible extension builds.
+The host application chooses the DuckDB-Wasm version and supplies its classic Worker URL through `createInMemoryCatalogWorker({ duckdbWorker })`. The catalog extension requires a binary built for that DuckDB-Wasm version and the supported `wasm_eh` platform. Extension builds use the DuckDB commit and Emscripten versions recorded in `versions.lock`.
 
 Use it when your application already owns a declarative dataset model and you want DuckDB-Wasm to query that model as a normal catalog instead of synchronizing it through procedural DDL.
 
@@ -74,13 +74,13 @@ src/in_memory_catalog_extension.cpp extension implementation
 src/javascript/                     controller and Dedicated Worker runtime
 demo/                               GitHub Pages browser demo
 docs/                               Ox Content user documentation
-scripts/build-wasm.sh               pinned Wasm extension build
+scripts/build-wasm.sh               Wasm extension build using versions.lock
 scripts/build-pages.mjs             demo artifact build
 scripts/serve-pages.mjs             local Range-capable Pages preview
 test/unit/                           JavaScript component contracts
 ```
 
-DuckDB and Emscripten versions are pinned in `versions.lock`.
+The DuckDB commit and Emscripten version used for extension builds are specified in `versions.lock`.
 
 ## Status
 

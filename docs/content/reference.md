@@ -129,7 +129,7 @@ extension: {
 }
 ```
 
-The extension binary must match the DuckDB-Wasm version selected by the host application and the `wasm_eh` platform. The catalog package does not choose the host's DuckDB-Wasm dependency. A repository URL is passed to DuckDB as-is; it must implement the repository layout and platform/version resolution expected by the DuckDB-Wasm build in use.
+The extension binary must match the DuckDB-Wasm version selected by the host application and the `wasm_eh` platform. The host application supplies the DuckDB-Wasm dependency and its classic Worker URL. A repository URL is passed to DuckDB as-is; it must implement the repository layout and platform/version resolution expected by the DuckDB-Wasm build in use.
 
 ### `createInMemoryCatalogWorker()`
 
@@ -192,8 +192,8 @@ Remove `initialRevision` from `initialize(db, worker, options, initialRevision, 
 ## Current limitations
 
 - Experimental public API.
-- The host selects the DuckDB-Wasm version, but must provide a matching `wasm_eh` catalog extension binary.
-- The extension build itself remains reproducible through the DuckDB commit and Emscripten pins in `versions.lock`; those pins describe the repository's build, not a runtime dependency imposed on host applications.
+- The host application must provide a DuckDB-Wasm version and a matching `wasm_eh` catalog extension binary.
+- The extension build uses the DuckDB commit and Emscripten versions specified in `versions.lock`; these build inputs are separate from the DuckDB-Wasm version selected by the host application.
 - Read-only catalog; DuckDB-side catalog mutation is rejected.
 - `format_version: 2` only.
 - Parquet is the only supported scanner.
