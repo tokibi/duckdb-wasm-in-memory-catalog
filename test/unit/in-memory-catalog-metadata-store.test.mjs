@@ -34,6 +34,21 @@ function table(name, snapshotId, uri) {
   }
 }
 
+function view(name = 'view1', query = 'SELECT id FROM table1') {
+  return { name, query }
+}
+
+function viewSnapshot() {
+  return {
+    format_version: 3,
+    schemas: [{
+      name: 'main',
+      tables: [table('table1', 'snapshot-1', 'https://example.test/table')],
+      views: [view()],
+    }],
+  }
+}
+
 function multiTableSnapshot(suffix = 'initial') {
   return {
     format_version: 2,
@@ -140,6 +155,7 @@ describe('InMemoryCatalogMetadataStore', () => {
 
     assert.equal(store.currentRevision('workspace'), 1n)
     assert.deepEqual(store.listSchemas('workspace', '1'), ['main'])
+    assert.deepEqual(store.listViews('workspace', '1', 'main'), [])
     assert.deepEqual(store.listTables('workspace', '1', 'main'), [{
       name: 'table1',
       columns: [{ name: 'id', type: 'BIGINT', nullable: false }],
@@ -148,6 +164,80 @@ describe('InMemoryCatalogMetadataStore', () => {
     assert.deepEqual(table.scanner, { type: 'parquet', options: {} })
     assert.deepEqual(table.files, [{ uri: 'https://example.test/table' }])
     assert.doesNotMatch(JSON.stringify(store.listTables('workspace', '1', 'main')), /uri|files|scanner/)
+  })
+
+  it('publishes views without file metadata and keeps table and view names unique', async () => {
+    const store = new InMemoryCatalogMetadataStore()
+    const session = store.openWorkspaceSession('workspace')
+
+    await session.replaceCatalogSnapshot(viewSnapshot())
+
+    assert.deepEqual(store.listViews('workspace', '1', 'main'), [view()])
+    assert.deepEqual(store.lookupView('workspace', '1', 'main', 'VIEW1'), view())
+    assert.deepEqual(store.lookupTable('workspace', '1', 'main', 'table1').files, [
+      { uri: 'https://example.test/table' },
+    ])
+
+    const collision = viewSnapshot()
+    collision.schemas[0].views[0].name = 'TABLE1'
+    await expectCode(() => session.replaceCatalogSnapshot(collision), 'RC_METADATA_INVALID')
+
+    const legacy = snapshot()
+    legacy.schemas[0].views = [view()]
+    await expectCode(() => session.replaceCatalogSnapshot(legacy), 'RC_METADATA_VERSION')
+    assert.equal(store.currentRevision('workspace'), 1n)
+  })
+
+  it('accepts view-only schemas and validates the exact view shape', async () => {
+    const store = new InMemoryCatalogMetadataStore()
+    const session = store.openWorkspaceSession('workspace')
+    const viewOnly = {
+      format_version: 3,
+      schemas: [{ name: 'main', views: [view('constant', 'SELECT 1 AS value')] }],
+    }
+
+    await session.replaceCatalogSnapshot(viewOnly)
+    assert.deepEqual(store.listTables('workspace', '1', 'main'), [])
+    assert.deepEqual(store.listViews('workspace', '1', 'main'), [
+      view('constant', 'SELECT 1 AS value'),
+    ])
+
+    const withColumns = structuredClone(viewOnly)
+    withColumns.schemas[0].views[0].columns = [{ name: 'value', type: 'INTEGER' }]
+    await expectCode(() => session.replaceCatalogSnapshot(withColumns), 'RC_METADATA_INVALID')
+
+    const duplicate = structuredClone(viewOnly)
+    duplicate.schemas[0].views.push(view('CONSTANT', 'SELECT 2 AS value'))
+    await expectCode(() => session.replaceCatalogSnapshot(duplicate), 'RC_METADATA_INVALID')
+
+    const emptyQuery = structuredClone(viewOnly)
+    emptyQuery.schemas[0].views[0].query = '   '
+    await expectCode(() => session.replaceCatalogSnapshot(emptyQuery), 'RC_METADATA_INVALID')
+    assert.equal(store.currentRevision('workspace'), 1n)
+  })
+
+  it('replaces an existing view atomically and keeps the catalog on format version 3', async () => {
+    const store = new InMemoryCatalogMetadataStore()
+    const session = store.openWorkspaceSession('workspace')
+    await session.replaceCatalogSnapshot(viewSnapshot())
+
+    const replacement = view('VIEW1', 'SELECT id FROM table1 WHERE id > 10')
+    const update = session.replaceCatalogView('MAIN', replacement)
+    replacement.query = 'SELECT id FROM table1 WHERE id > 20'
+    await update
+
+    assert.deepEqual(store.lookupView('workspace', '2', 'main', 'view1'), view(
+      'view1',
+      'SELECT id FROM table1 WHERE id > 10',
+    ))
+    assert.equal(store.lookupTable('workspace', '2', 'main', 'table1').name, 'table1')
+    assert.equal(store.currentRevision('workspace'), 2n)
+
+    await expectCode(
+      () => session.replaceCatalogView('main', view('missing', 'SELECT 1')),
+      'RC_CATALOG_VIEW_NOT_FOUND',
+    )
+    assert.equal(store.currentRevision('workspace'), 2n)
   })
 
   it('keeps host file URIs stable when only the table snapshot changes', async () => {

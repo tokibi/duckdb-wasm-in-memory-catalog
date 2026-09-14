@@ -11,7 +11,7 @@ Catalog publication では catalog 全体の complete snapshot を送ります�
 
 ```js
 {
-  format_version: 2,
+  format_version: 3,
   schemas: [
     {
       name: 'analytics',
@@ -32,6 +32,12 @@ Catalog publication では catalog 全体の complete snapshot を送ります�
           ],
         },
       ],
+      views: [
+        {
+          name: 'recent_events',
+          query: "SELECT * FROM events WHERE occurred_at >= current_date - INTERVAL '7 days'",
+        },
+      ],
     },
   ],
 }
@@ -41,15 +47,20 @@ Catalog publication では catalog 全体の complete snapshot を送ります�
 
 | Field | 意味 |
 | --- | --- |
-| `format_version` | Snapshot schema version。現在は `2`。 |
+| `format_version` | Snapshot schema version。Table のみなら `2`、view も含めるなら `3` を使う。 |
 | `schemas` | アプリケーションが publish する schema 全体。 |
 | `schemas[].name` | DuckDB schema 名。 |
 | `schemas[].tables` | Schema に含まれる table。 |
+| `schemas[].views` | Schema に含まれる view。`format_version: 3` で利用可能。 |
 | `tables[].name` | DuckDB table 名。 |
 | `tables[].snapshot` | Scan cache を分離するための table content/schema identity。 |
 | `tables[].scanner` | 明示的な file scanner configuration。 |
 | `tables[].columns` | DuckDB 上の順序で定義した column。 |
 | `tables[].files` | Table を構成する file。 |
+| `views[].name` | DuckDB view 名。 |
+| `views[].query` | View を定義する単一の `SELECT` statement。 |
+
+同じ schema 内の table 名と view 名は、大文字・小文字を区別しない共通の namespace を使います。Format 3 の schema には table、view、またはその両方を含められます。View の column と型は query の bind 時に DuckDB が導出するため、view metadata に `columns` はありません。
 
 ### Column
 
@@ -159,6 +170,12 @@ Controller の lifecycle state です。正常に cleanup された場合の ter
 
 入力は呼び出し時に複製され、全体置換と共通のキューで処理されます。成功すると対象テーブルだけを原子的に更新し、内部世代を進めます。戻り値は `Promise<void>` です。
 
+### `catalog.replaceView(schemaName, view)`
+
+Format 3 snapshot にある既存 view の定義全体を置換します。View は `name` と `query` だけを持ちます。Schema 名と view 名は大文字・小文字を区別せずに照合し、既存の表記を維持します。View の追加、削除、名前変更には `publishSnapshot()` を使ってください。
+
+入力は呼び出し時に複製され、全体置換や単一テーブル置換と共通のキューで処理されます。成功すると対象 view だけを原子的に更新し、内部世代を進めます。戻り値は `Promise<void>` です。
+
 ### `catalog.diagnostics()`
 
 それ以前に queue された operation の完了後、Worker-side catalog diagnostics を返します。
@@ -178,12 +195,15 @@ Controller failure は `InMemoryCatalogControllerError` として throw され�
 | `RC_METADATA_INVALID` | Controller input または catalog metadata が不正。 |
 | `RC_CATALOG_SCHEMA_NOT_FOUND` | 単一テーブル更新の対象 schema が存在しない。 |
 | `RC_CATALOG_TABLE_NOT_FOUND` | 単一テーブル更新の対象 table が存在しない。 |
+| `RC_CATALOG_VIEW_NOT_FOUND` | 単一 view 更新の対象 view が存在しない。 |
 | `RC_REMOTE_IO` | Worker communication の失敗、timeout、想定外 response。 |
 | `RC_CATALOG_WORKSPACE_CLOSED` | Controller が operation を受け付けなくなった後に呼び出した。 |
 | `RC_CATALOG_RECOVERY_REQUIRED` | Cleanup に失敗し、対象 runtime の再作成が必要。 |
 | `RC_METADATA_GENERATION_EXHAUSTED` | Private な internal generation の上限に達した。Workspace を再作成する必要がある。 |
 
 Snapshot validation では Worker / extension から追加の catalog-specific code が返ることがあります。分岐には error code を使い、message は診断情報として扱ってください。
+
+View を parse または bind できない場合、DuckDB query は `RC_CATALOG_VIEW_INVALID` を報告します。View の依存関係が循環している場合は `RC_CATALOG_VIEW_CYCLE` を報告します。これらは `InMemoryCatalogControllerError.code` ではなく、DuckDB query の error message に含まれます。
 
 ## Revision-based publication からの移行
 
@@ -195,7 +215,7 @@ Snapshot validation では Worker / extension から追加の catalog-specific c
 - ホストアプリケーションは DuckDB-Wasm version と、それに対応する `wasm_eh` catalog extension binary を用意する必要があります。
 - Extension build では、`versions.lock` に指定された DuckDB commit と Emscripten version を使用します。これはホストアプリケーションが選択する DuckDB-Wasm version とは別の build input です。
 - Read-only catalog。DuckDB 側からの catalog mutation は拒否される。
-- `format_version: 2` のみ。
+- `format_version: 2` は table、`format_version: 3` は view もサポートする。
 - Scanner は Parquet のみ。
 - Parquet scanner options は現在空 object のみ。
 - Host が完全な column metadata を与える必要があり、catalog 自体は schema inference を行わない。
