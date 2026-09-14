@@ -1,5 +1,8 @@
 import * as duckdb from './duckdb/duckdb-browser.mjs'
-import { InMemoryCatalogController } from './in-memory-catalog/in-memory-catalog-controller.mjs'
+import {
+  createInMemoryCatalogWorker,
+  InMemoryCatalogController,
+} from './in-memory-catalog/in-memory-catalog-controller.mjs'
 
 const runButton = document.querySelector('#run-demo')
 const resetButton = document.querySelector('#reset-demo')
@@ -247,10 +250,9 @@ async function initializeCatalog(database, worker, catalogName, catalogSnapshot)
       {
         workspaceId: `pages-demo-${crypto.randomUUID()}`,
         catalogName,
-        extensionName: new URL(
-          './extension/in_memory_catalog.duckdb_extension.wasm',
-          rootUrl,
-        ).href,
+        extension: {
+          url: new URL('./extension/in_memory_catalog.duckdb_extension.wasm', rootUrl).href,
+        },
       },
       catalogSnapshot,
     )
@@ -350,7 +352,9 @@ async function startRuntime() {
     )
 
     setStep('catalog', 'active', 'Starting DuckDB-Wasm and attaching the catalog')
-    worker = new Worker(new URL('./in-memory-catalog/in-memory-catalog-worker.js', rootUrl))
+    worker = createInMemoryCatalogWorker({
+      duckdbWorker: new URL('./duckdb/duckdb-browser-eh.worker.js', rootUrl),
+    })
     database = new duckdb.AsyncDuckDB(new duckdb.VoidLogger(), worker)
     await database.instantiate(new URL('./duckdb/duckdb-eh.wasm', rootUrl).href)
     await database.open({

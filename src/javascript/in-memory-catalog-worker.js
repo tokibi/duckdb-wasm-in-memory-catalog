@@ -1,8 +1,16 @@
 // Production DuckDB Worker wrapper for the In-Memory Catalog component.
-importScripts('/in-memory-catalog/common-worker-router.js')
-importScripts('/in-memory-catalog/in-memory-catalog-metadata-store.js')
-importScripts('/in-memory-catalog/in-memory-catalog-worker-runtime.js')
-importScripts('/duckdb/duckdb-browser-eh.worker.js')
+importScripts('./common-worker-router.js')
+importScripts('./in-memory-catalog-metadata-store.js')
+importScripts('./in-memory-catalog-worker-runtime.js')
+
+const duckdbWorkerUrl = new URLSearchParams(globalThis.location.search).get('duckdbWorker')
+if (!duckdbWorkerUrl) {
+  throw new Error(
+    'The In-Memory Catalog Worker requires a duckdbWorker URL. ' +
+    'Create it with createInMemoryCatalogWorker({ duckdbWorker }).',
+  )
+}
+importScripts(duckdbWorkerUrl)
 
 const dispatchDuckDBMessage = globalThis.onmessage
 const router = globalThis.DuckDBCommonWorkerRouter.createWorkerRouter(

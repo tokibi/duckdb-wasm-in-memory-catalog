@@ -4,6 +4,7 @@ import { describe, it } from 'node:test'
 await import('../../src/javascript/in-memory-catalog-metadata-store.js')
 await import('../../src/javascript/in-memory-catalog-worker-runtime.js')
 const {
+  createInMemoryCatalogWorker,
   InMemoryCatalogController,
   InMemoryCatalogControllerError,
 } = await import('../../src/javascript/in-memory-catalog-controller.mjs')
@@ -46,6 +47,33 @@ function runtimeWorker(runtime) {
 }
 
 describe('InMemoryCatalogController', () => {
+  it('creates a classic catalog Worker around the caller-selected DuckDB Worker', () => {
+    const originalWorker = globalThis.Worker
+    const calls = []
+    globalThis.Worker = class FakeWorker {
+      constructor(url, options) {
+        calls.push({ url, options })
+      }
+    }
+
+    try {
+      const worker = createInMemoryCatalogWorker({
+        duckdbWorker: 'https://cdn.example.test/duckdb-browser-eh.worker.js',
+      })
+
+      assert.ok(worker instanceof globalThis.Worker)
+      assert.equal(calls.length, 1)
+      assert.equal(calls[0].options.type, 'classic')
+      assert.equal(
+        new URL(calls[0].url.searchParams.get('duckdbWorker')).href,
+        'https://cdn.example.test/duckdb-browser-eh.worker.js',
+      )
+    } finally {
+      if (originalWorker === undefined) delete globalThis.Worker
+      else globalThis.Worker = originalWorker
+    }
+  })
+
   it('opens, publishes, attaches, refreshes, then detaches and drops without owning the Worker', async () => {
     const store = new InMemoryCatalogMetadataStore()
     const worker = runtimeWorker(createInMemoryCatalogWorkerRuntime(store))
@@ -74,6 +102,72 @@ describe('InMemoryCatalogController', () => {
     assert.equal(worker.terminated, false)
     assert.equal(controller.state, 'closed')
     assert.equal(store.diagnostics().active_workspace_session_count, 0)
+  })
+
+  it('installs an extension from a repository before loading it', async () => {
+    const store = new InMemoryCatalogMetadataStore()
+    const worker = runtimeWorker(createInMemoryCatalogWorkerRuntime(store))
+    const { db, queries } = fakeDatabase()
+    const controller = await InMemoryCatalogController.initialize(
+      db,
+      worker,
+      {
+        workspaceId: 'workspace',
+        catalogName: 'dataset',
+        extension: {
+          name: 'in_memory_catalog',
+          repository: 'https://example.test/extensions',
+        },
+        ackTimeoutMs: 100,
+      },
+      snapshot(),
+    )
+
+    await controller.close()
+    assert.deepEqual(queries.slice(0, 4), [
+      'LOAD parquet',
+      "INSTALL 'in_memory_catalog' FROM 'https://example.test/extensions'",
+      "LOAD 'in_memory_catalog'",
+      'ATTACH \'workspace\' AS "dataset" (TYPE in_memory_catalog, READ_ONLY)',
+    ])
+  })
+
+  it('loads a directly supplied extension URL', async () => {
+    const store = new InMemoryCatalogMetadataStore()
+    const worker = runtimeWorker(createInMemoryCatalogWorkerRuntime(store))
+    const { db, queries } = fakeDatabase()
+    const controller = await InMemoryCatalogController.initialize(
+      db,
+      worker,
+      {
+        workspaceId: 'workspace',
+        catalogName: 'dataset',
+        extension: { url: '/extensions/in_memory_catalog.duckdb_extension.wasm' },
+        ackTimeoutMs: 100,
+      },
+      snapshot(),
+    )
+
+    await controller.close()
+    assert.equal(queries[1], "LOAD '/extensions/in_memory_catalog.duckdb_extension.wasm'")
+  })
+
+  it('rejects ambiguous extension configuration', async () => {
+    const { db } = fakeDatabase()
+    await assert.rejects(
+      () => InMemoryCatalogController.initialize(
+        db,
+        {},
+        {
+          workspaceId: 'workspace',
+          catalogName: 'dataset',
+          extensionName: 'legacy_name',
+          extension: { url: '/extensions/catalog.wasm' },
+        },
+        snapshot(),
+      ),
+      (error) => error.code === 'RC_METADATA_INVALID',
+    )
   })
 
   it('captures each submitted state before queuing and recovers from failed publication', async () => {

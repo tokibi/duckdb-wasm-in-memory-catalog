@@ -109,9 +109,37 @@ DuckDB connection を作成し、Parquet と catalog extension をロードし�
 | --- | --- | --- | --- |
 | `workspaceId` | yes | — | 空でない workspace/session identifier。 |
 | `catalogName` | yes | — | DuckDB に attach するときの catalog 名。 |
-| `extensionName` | no | `in_memory_catalog` | `LOAD` に渡す extension 名または URL。 |
+| `extension` | no | `{ name: 'in_memory_catalog' }` | Extension のロード設定。`url` は Wasm extension の直接 `LOAD`、`name` と `repository` の組み合わせは `INSTALL ... FROM ...` と `LOAD` に使います。 |
+| `extensionName` | no | — | 直接 `LOAD` する名前または URL を指定するための legacy alias。`extension` とは併用しません。 |
 | `ackTimeoutMs` | no | `5000` | Worker acknowledgement を待つ positive safe integer timeout。 |
 | `onRecoveryRequired` | no | — | Cleanup 結果が不確実になった場合に呼ばれる callback。 |
+
+`extension` の例です。
+
+```js
+// アプリケーションから配信する extension asset を直接ロードする。
+extension: {
+  url: '/extension/in_memory_catalog.duckdb_extension.wasm',
+}
+
+// DuckDB extension repository から install してロードする。
+extension: {
+  name: 'in_memory_catalog',
+  repository: 'https://example.test/extensions',
+}
+```
+
+Extension binary は、アプリケーションが選択した DuckDB-Wasm version と `wasm_eh` platform に一致する必要があります。Catalog package がアプリケーションの DuckDB-Wasm dependency を選択することはありません。Repository URL は DuckDB にそのまま渡されるため、利用する DuckDB-Wasm build が期待する repository layout と version/platform 解決を提供する必要があります。
+
+### `createInMemoryCatalogWorker()`
+
+```js
+const worker = createInMemoryCatalogWorker({
+  duckdbWorker: '/duckdb/duckdb-browser-eh.worker.js',
+})
+```
+
+DuckDB-Wasm と catalog が共有する classic Worker wrapper を作成します。`duckdbWorker` は必須で、選択した DuckDB-Wasm bundle に対応する classic Worker を指定します。現在の対応範囲は `wasm_eh` で、`wasm_mvp` と `coi` は対応 API の契約に含まれません。Worker URL と catalog の各 asset は、アプリケーションの CSP およびブラウザーの same-origin/CORS 条件を満たす必要があります。
 
 ### `catalog.connection`
 
@@ -164,6 +192,8 @@ Snapshot validation では Worker / extension から追加の catalog-specific c
 ## 現在の制約
 
 - Public API は experimental。
+- DuckDB-Wasm version はホストが選択しますが、対応する `wasm_eh` catalog extension binary を用意する必要があります。
+- Extension build の再現性のため、`versions.lock` には DuckDB commit と Emscripten の pin が残っています。これはリポジトリ自身の build 用であり、ホストアプリケーションに runtime dependency として強制されるものではありません。
 - Read-only catalog。DuckDB 側からの catalog mutation は拒否される。
 - `format_version: 2` のみ。
 - Scanner は Parquet のみ。

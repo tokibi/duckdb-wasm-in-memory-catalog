@@ -6,6 +6,8 @@ Publish application-owned table metadata as a read-only DuckDB catalog in the br
 
 The host application supplies complete schema, table, column, scanner, and file metadata. A Dedicated Worker validates complete catalog snapshots or individual table replacements, atomically updates its catalog state, and exposes table descriptors to the `in_memory_catalog` Wasm extension on demand.
 
+The host application chooses its own DuckDB-Wasm version and classic Worker. Use `createInMemoryCatalogWorker({ duckdbWorker })` to wrap that Worker; the catalog package does not impose a runtime DuckDB-Wasm dependency. The catalog extension still needs a binary built for the selected DuckDB-Wasm version and the currently supported `wasm_eh` platform. The DuckDB commit and Emscripten pins in `versions.lock` are retained for reproducible extension builds.
+
 Use it when your application already owns a declarative dataset model and you want DuckDB-Wasm to query that model as a normal catalog instead of synchronizing it through procedural DDL.
 
 ```mermaid

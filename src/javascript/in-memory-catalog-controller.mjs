@@ -6,6 +6,31 @@ export class InMemoryCatalogControllerError extends Error {
   }
 }
 
+/**
+ * Create the classic Worker used by both DuckDB-Wasm and the catalog runtime.
+ *
+ * The catalog wrapper intentionally does not bundle or choose a DuckDB-Wasm
+ * Worker. The caller supplies the Worker that matches its selected DuckDB-Wasm
+ * bundle; the wrapper loads that script in the same Dedicated Worker so the
+ * synchronous extension bridge remains available.
+ */
+export function createInMemoryCatalogWorker({ duckdbWorker, workerUrl } = {}) {
+  const duckdbWorkerUrl = requireWorkerUrl(duckdbWorker, 'duckdbWorker')
+  const catalogWorkerUrl = requireWorkerUrl(
+    workerUrl === undefined ? new URL('./in-memory-catalog-worker.js', import.meta.url) : workerUrl,
+    'workerUrl',
+  )
+  catalogWorkerUrl.searchParams.set('duckdbWorker', duckdbWorkerUrl.href)
+
+  if (typeof globalThis.Worker !== 'function') {
+    throw new InMemoryCatalogControllerError(
+      'RC_RUNTIME_UNAVAILABLE',
+      'The Worker API is required to create an In-Memory Catalog Worker',
+    )
+  }
+  return new globalThis.Worker(catalogWorkerUrl, { type: 'classic' })
+}
+
 export class InMemoryCatalogController {
   #connection
   #session
@@ -24,7 +49,14 @@ export class InMemoryCatalogController {
     let controller
     try {
       await connection.query('LOAD parquet')
-      await connection.query(`LOAD ${quote(normalized.extensionName)}`)
+      if (normalized.extension.repository !== undefined) {
+        await connection.query(
+          `INSTALL ${quote(normalized.extension.name)} FROM ${quote(normalized.extension.repository)}`,
+        )
+        await connection.query(`LOAD ${quote(normalized.extension.name)}`)
+      } else {
+        await connection.query(`LOAD ${quote(normalized.extension.url ?? normalized.extension.name)}`)
+      }
       const session = await WorkspaceSessionClient.open(
         worker,
         normalized.workspaceId,
@@ -346,11 +378,69 @@ function normalizeOptions(options) {
   return {
     workspaceId: requireName(options.workspaceId, 'workspaceId'),
     catalogName: requireName(options.catalogName, 'catalogName'),
-    extensionName: options.extensionName === undefined
-      ? 'in_memory_catalog'
-      : requireName(options.extensionName, 'extensionName'),
+    extension: normalizeExtension(options),
     ackTimeoutMs,
     onRecoveryRequired: options.onRecoveryRequired,
+  }
+}
+
+function normalizeExtension(options) {
+  if (options.extension !== undefined) {
+    if (!options.extension || typeof options.extension !== 'object' || Array.isArray(options.extension)) {
+      throw new InMemoryCatalogControllerError(
+        'RC_METADATA_INVALID',
+        'extension must be an object',
+      )
+    }
+    if (options.extensionName !== undefined) {
+      throw new InMemoryCatalogControllerError(
+        'RC_METADATA_INVALID',
+        'extensionName cannot be combined with extension',
+      )
+    }
+    const name = options.extension.name === undefined
+      ? 'in_memory_catalog'
+      : requireName(options.extension.name, 'extension.name')
+    const url = options.extension.url === undefined
+      ? undefined
+      : requireExtensionLocation(options.extension.url, 'extension.url')
+    const repository = options.extension.repository === undefined
+      ? undefined
+      : requireExtensionLocation(options.extension.repository, 'extension.repository')
+    if (url !== undefined && repository !== undefined) {
+      throw new InMemoryCatalogControllerError(
+        'RC_METADATA_INVALID',
+        'extension.url and extension.repository are mutually exclusive',
+      )
+    }
+    return { name, url, repository }
+  }
+
+  const name = options.extensionName === undefined
+    ? 'in_memory_catalog'
+    : requireName(options.extensionName, 'extensionName')
+  return { name }
+}
+
+function requireExtensionLocation(value, field) {
+  return requireName(value, field)
+}
+
+function requireWorkerUrl(value, field) {
+  if (value instanceof URL) return new URL(value.href)
+  if (typeof value !== 'string' || value.length === 0 || value.includes('\0')) {
+    throw new InMemoryCatalogControllerError(
+      'RC_METADATA_INVALID',
+      `${field} must be a non-empty URL string or URL object without NUL`,
+    )
+  }
+  try {
+    return new URL(value, import.meta.url)
+  } catch {
+    throw new InMemoryCatalogControllerError(
+      'RC_METADATA_INVALID',
+      `${field} must be a valid URL string or URL object`,
+    )
   }
 }
 

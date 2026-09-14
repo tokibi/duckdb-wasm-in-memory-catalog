@@ -31,7 +31,7 @@ await copy(
   'src/javascript/in-memory-catalog-worker-runtime.js',
   'in-memory-catalog/in-memory-catalog-worker-runtime.js',
 )
-await copy('demo/in-memory-catalog-worker.js', 'in-memory-catalog/in-memory-catalog-worker.js')
+await copy('src/javascript/in-memory-catalog-worker.js', 'in-memory-catalog/in-memory-catalog-worker.js')
 
 await copy('node_modules/@duckdb/duckdb-wasm/dist/duckdb-browser.mjs', 'duckdb/duckdb-browser.mjs')
 await copy('node_modules/@duckdb/duckdb-wasm/dist/duckdb-eh.wasm', 'duckdb/duckdb-eh.wasm')
