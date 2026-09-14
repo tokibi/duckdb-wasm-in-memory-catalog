@@ -1,7 +1,12 @@
 importScripts('./common-worker-router.js')
 importScripts('./in-memory-catalog-metadata-store.js')
 importScripts('./in-memory-catalog-worker-runtime.js')
-importScripts('../duckdb/duckdb-browser-eh.worker.js')
+
+const duckdbWorkerUrl = new URLSearchParams(globalThis.location.search).get('duckdbWorker')
+if (!duckdbWorkerUrl) {
+  throw new Error('The demo In-Memory Catalog Worker requires a duckdbWorker URL')
+}
+importScripts(duckdbWorkerUrl)
 
 const dispatchDuckDBMessage = globalThis.onmessage
 const router = globalThis.DuckDBCommonWorkerRouter.createWorkerRouter(

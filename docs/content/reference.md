@@ -109,9 +109,37 @@ Creates a DuckDB connection, loads Parquet and the catalog extension, opens a Wo
 | --- | --- | --- | --- |
 | `workspaceId` | yes | — | Non-empty workspace/session identifier. |
 | `catalogName` | yes | — | Name used by DuckDB when attaching the catalog. |
-| `extensionName` | no | `in_memory_catalog` | Extension name or URL passed to `LOAD`. |
+| `extension` | no | `{ name: 'in_memory_catalog' }` | Extension loading configuration. Use `url` for a directly supplied Wasm extension, or `name` plus `repository` to run `INSTALL ... FROM ...` followed by `LOAD`. |
+| `extensionName` | no | — | Legacy alias for a direct `LOAD` name or URL. Do not combine it with `extension`. |
 | `ackTimeoutMs` | no | `5000` | Positive safe-integer timeout for Worker acknowledgements. |
 | `onRecoveryRequired` | no | — | Callback invoked when cleanup becomes uncertain. |
+
+`extension` examples:
+
+```js
+// Directly load an extension asset served by the application.
+extension: {
+  url: '/extension/in_memory_catalog.duckdb_extension.wasm',
+}
+
+// Install and load a binary from a DuckDB extension repository.
+extension: {
+  name: 'in_memory_catalog',
+  repository: 'https://example.test/extensions',
+}
+```
+
+The extension binary must match the DuckDB-Wasm version selected by the host application and the `wasm_eh` platform. The host application supplies the DuckDB-Wasm dependency and its classic Worker URL. A repository URL is passed to DuckDB as-is; it must implement the repository layout and platform/version resolution expected by the DuckDB-Wasm build in use.
+
+### `createInMemoryCatalogWorker()`
+
+```js
+const worker = createInMemoryCatalogWorker({
+  duckdbWorker: '/duckdb/duckdb-browser-eh.worker.js',
+})
+```
+
+Creates the classic Worker wrapper used by DuckDB-Wasm and the catalog. `duckdbWorker` is required and must be the classic Worker belonging to the selected DuckDB-Wasm bundle. The wrapper currently supports `wasm_eh`; `wasm_mvp` and `coi` are not part of the supported API contract. The Worker URL and imported catalog assets must satisfy the application's CSP and browser same-origin/CORS rules.
 
 ### `catalog.connection`
 
@@ -164,6 +192,8 @@ Remove `initialRevision` from `initialize(db, worker, options, initialRevision, 
 ## Current limitations
 
 - Experimental public API.
+- The host application must provide a DuckDB-Wasm version and a matching `wasm_eh` catalog extension binary.
+- The extension build uses the DuckDB commit and Emscripten versions specified in `versions.lock`; these build inputs are separate from the DuckDB-Wasm version selected by the host application.
 - Read-only catalog; DuckDB-side catalog mutation is rejected.
 - `format_version: 2` only.
 - Parquet is the only supported scanner.

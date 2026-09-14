@@ -12,7 +12,7 @@ This guide shows the shortest path from a DuckDB-Wasm database to a queryable in
 
 ## 1. Prepare the browser assets
 
-The catalog needs a custom Worker wrapper in addition to DuckDB-Wasm. That Worker loads the catalog router, metadata store, Worker runtime, and DuckDB's browser Worker into one Dedicated Worker.
+The catalog needs a custom Worker wrapper around the classic DuckDB-Wasm Worker. Provide the classic Worker URL belonging to the DuckDB-Wasm bundle selected by your application. The wrapper loads that Worker script into the same Dedicated Worker so the catalog extension can synchronously access its metadata bridge.
 
 Serve these assets from your application:
 
@@ -27,15 +27,20 @@ Serve these assets from your application:
 /extension/in_memory_catalog.duckdb_extension.wasm
 ```
 
-The repository's `scripts/build-pages.mjs` shows one concrete way to assemble them.
+The `duckdb` files must come from a compatible `@duckdb/duckdb-wasm` version, and the catalog extension must be built for that DuckDB version and the `wasm_eh` platform. The repository's `scripts/build-pages.mjs` shows one concrete way to assemble the assets.
 
 ## 2. Create DuckDB-Wasm with the catalog Worker
 
 ```js
 import * as duckdb from '@duckdb/duckdb-wasm'
-import { InMemoryCatalogController } from '/in-memory-catalog/in-memory-catalog-controller.mjs'
+import {
+  createInMemoryCatalogWorker,
+  InMemoryCatalogController,
+} from '/in-memory-catalog/in-memory-catalog-controller.mjs'
 
-const worker = new Worker('/in-memory-catalog/in-memory-catalog-worker.js')
+const worker = createInMemoryCatalogWorker({
+  duckdbWorker: '/duckdb/duckdb-browser-eh.worker.js',
+})
 const db = new duckdb.AsyncDuckDB(new duckdb.VoidLogger(), worker)
 
 await db.instantiate('/duckdb/duckdb-eh.wasm')
@@ -50,7 +55,7 @@ await db.open({
 })
 ```
 
-The same Worker is used by DuckDB-Wasm and the catalog controller. A normal DuckDB browser Worker is not sufficient because it does not handle the catalog's namespaced metadata messages.
+The same Worker is used by DuckDB-Wasm and the catalog controller. A normal DuckDB browser Worker is not sufficient because it does not handle the catalog's namespaced metadata messages. The supplied URL must point to a classic DuckDB-Wasm Worker; module Workers are not supported by this wrapper. The Worker script and all imported catalog scripts must be reachable under your CSP and have the required same-origin/CORS permissions.
 
 `allowUnsignedExtensions` is required when loading the locally built Wasm extension.
 
@@ -97,13 +102,15 @@ const catalog = await InMemoryCatalogController.initialize(
   {
     workspaceId: crypto.randomUUID(),
     catalogName: 'app',
-    extensionName: '/extension/in_memory_catalog.duckdb_extension.wasm',
+    extension: {
+      url: '/extension/in_memory_catalog.duckdb_extension.wasm',
+    },
   },
   snapshot,
 )
 ```
 
-Initialization loads Parquet support, loads the in-memory catalog extension, publishes the initial snapshot, and attaches the catalog read-only.
+Initialization loads Parquet support, loads the in-memory catalog extension, publishes the initial snapshot, and attaches the catalog read-only. You can instead install an extension from a compatible repository with `extension: { name: 'in_memory_catalog', repository: 'https://example.test/extensions' }`; this emits DuckDB's `INSTALL ... FROM ...` followed by `LOAD ...`. The repository must provide a binary matching the selected DuckDB-Wasm version and `wasm_eh` platform.
 
 ## 5. Query it
 

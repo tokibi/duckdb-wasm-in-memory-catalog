@@ -12,7 +12,7 @@ DuckDB-Wasm の database から in-memory catalog をクエリできる状態ま
 
 ## 1. Browser asset を準備する
 
-Catalog は通常の DuckDB-Wasm Worker に加えて custom Worker wrapper を必要とします。この Worker 内で catalog router、metadata store、Worker runtime、DuckDB browser Worker をまとめて読み込みます。
+Catalog は DuckDB-Wasm の classic Worker を包む custom Worker wrapper を必要とします。アプリケーションが選択した DuckDB-Wasm bundle に対応する classic Worker URL を指定します。wrapper はその Worker script を同じ Dedicated Worker 内で読み込むため、catalog extension から metadata bridge に同期アクセスできます。
 
 アプリケーションから次の asset を配信します。
 
@@ -27,15 +27,20 @@ Catalog は通常の DuckDB-Wasm Worker に加えて custom Worker wrapper を�
 /extension/in_memory_catalog.duckdb_extension.wasm
 ```
 
-具体的な配置方法は、このリポジトリの `scripts/build-pages.mjs` を参考にできます。
+`duckdb` のファイルは、互換性のある `@duckdb/duckdb-wasm` version から用意し、catalog extension はその DuckDB version と `wasm_eh` platform 向けに build します。具体的な配置方法は、このリポジトリの `scripts/build-pages.mjs` を参考にできます。
 
 ## 2. Catalog Worker で DuckDB-Wasm を作成する
 
 ```js
 import * as duckdb from '@duckdb/duckdb-wasm'
-import { InMemoryCatalogController } from '/in-memory-catalog/in-memory-catalog-controller.mjs'
+import {
+  createInMemoryCatalogWorker,
+  InMemoryCatalogController,
+} from '/in-memory-catalog/in-memory-catalog-controller.mjs'
 
-const worker = new Worker('/in-memory-catalog/in-memory-catalog-worker.js')
+const worker = createInMemoryCatalogWorker({
+  duckdbWorker: '/duckdb/duckdb-browser-eh.worker.js',
+})
 const db = new duckdb.AsyncDuckDB(new duckdb.VoidLogger(), worker)
 
 await db.instantiate('/duckdb/duckdb-eh.wasm')
@@ -50,7 +55,7 @@ await db.open({
 })
 ```
 
-同じ Worker を DuckDB-Wasm と catalog controller の両方で利用します。通常の DuckDB browser Worker だけでは catalog 用の namespaced metadata message を処理できません。
+同じ Worker を DuckDB-Wasm と catalog controller の両方で利用します。通常の DuckDB browser Worker だけでは catalog 用の namespaced metadata message を処理できません。指定する URL は classic DuckDB-Wasm Worker である必要があり、module Worker には対応していません。Worker script と catalog の各 script は CSP の許可対象であり、必要な same-origin/CORS 条件を満たす必要があります。
 
 ローカルで build した Wasm extension をロードするため、`allowUnsignedExtensions` が必要です。
 
@@ -97,13 +102,15 @@ const catalog = await InMemoryCatalogController.initialize(
   {
     workspaceId: crypto.randomUUID(),
     catalogName: 'app',
-    extensionName: '/extension/in_memory_catalog.duckdb_extension.wasm',
+    extension: {
+      url: '/extension/in_memory_catalog.duckdb_extension.wasm',
+    },
   },
   snapshot,
 )
 ```
 
-初期化時に Parquet support と catalog extension をロードし、initial snapshot を publish して catalog を read-only で attach します。
+初期化時に Parquet support と catalog extension をロードし、initial snapshot を publish して catalog を read-only で attach します。互換性のある repository からインストールする場合は、`extension: { name: 'in_memory_catalog', repository: 'https://example.test/extensions' }` を指定できます。この場合は DuckDB の `INSTALL ... FROM ...` に続けて `LOAD ...` を実行します。Repository には、利用する DuckDB-Wasm version と `wasm_eh` platform に対応する binary が必要です。
 
 ## 5. Query する
 
