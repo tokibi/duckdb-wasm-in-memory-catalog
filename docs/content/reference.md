@@ -11,7 +11,7 @@ A catalog publication sends one complete snapshot.
 
 ```js
 {
-  format_version: 2,
+  format_version: 3,
   schemas: [
     {
       name: 'analytics',
@@ -32,6 +32,12 @@ A catalog publication sends one complete snapshot.
           ],
         },
       ],
+      views: [
+        {
+          name: 'recent_events',
+          query: "SELECT * FROM events WHERE occurred_at >= current_date - INTERVAL '7 days'",
+        },
+      ],
     },
   ],
 }
@@ -41,15 +47,20 @@ A catalog publication sends one complete snapshot.
 
 | Field | Meaning |
 | --- | --- |
-| `format_version` | Snapshot schema version. The current format is `2`. |
+| `format_version` | Snapshot schema version. Use `2` for tables only or `3` for tables and views. |
 | `schemas` | Complete set of schemas published by the application. |
 | `schemas[].name` | DuckDB schema name. |
 | `schemas[].tables` | Tables in the schema. |
+| `schemas[].views` | Views in the schema. Available with `format_version: 3`. |
 | `tables[].name` | DuckDB table name. |
 | `tables[].snapshot` | Table content/schema identity used for scan cache isolation. |
 | `tables[].scanner` | Explicit file scanner configuration. |
 | `tables[].columns` | Published logical columns in DuckDB order. |
 | `tables[].files` | Files forming the table. |
+| `views[].name` | DuckDB view name. |
+| `views[].query` | One `SELECT` statement defining the view. |
+
+Table and view names share one case-insensitive namespace within a schema. A schema in format 3 may contain tables, views, or both. View columns and types are derived by DuckDB when it binds the query, so view metadata does not include `columns`.
 
 ### Columns
 
@@ -159,6 +170,12 @@ Replaces the complete definition of an existing table. `table` uses the same for
 
 Input is copied at call time and processed in the same queue as complete publications. Success atomically updates the target table and advances the internal generation. Returns `Promise<void>`.
 
+### `catalog.replaceView(schemaName, view)`
+
+Replaces the complete definition of an existing view in a format 3 snapshot. The view contains exactly `name` and `query`. Schema and view names are matched case-insensitively, preserving their existing spelling. Use `publishSnapshot()` to add, remove, or rename views.
+
+Input is copied at call time and processed in the same queue as complete publications and table replacements. Success atomically updates the target view and advances the internal generation. Returns `Promise<void>`.
+
 ### `catalog.diagnostics()`
 
 Returns Worker-side catalog diagnostics after prior queued operations complete.
@@ -178,12 +195,15 @@ Important codes include:
 | `RC_METADATA_INVALID` | Invalid controller input or catalog metadata. |
 | `RC_CATALOG_SCHEMA_NOT_FOUND` | The schema targeted by a table replacement does not exist. |
 | `RC_CATALOG_TABLE_NOT_FOUND` | The table targeted by a table replacement does not exist. |
+| `RC_CATALOG_VIEW_NOT_FOUND` | The view targeted by a view replacement does not exist. |
 | `RC_REMOTE_IO` | Worker communication failed, timed out, or returned an unexpected result. |
 | `RC_CATALOG_WORKSPACE_CLOSED` | An operation was attempted after the controller stopped accepting work. |
 | `RC_CATALOG_RECOVERY_REQUIRED` | Cleanup failed and the application should recreate the affected runtime. |
 | `RC_METADATA_GENERATION_EXHAUSTED` | The private internal generation reached its limit; reopen the workspace. |
 
 Snapshot validation can return additional catalog-specific codes from the Worker/extension. Treat the error code as the machine-readable value and the message as diagnostic text.
+
+DuckDB queries report `RC_CATALOG_VIEW_INVALID` when a view cannot be parsed or bound and `RC_CATALOG_VIEW_CYCLE` when view dependencies are circular. These codes appear in the DuckDB query error message rather than as `InMemoryCatalogControllerError.code`.
 
 ## Migration from revision-based publications
 
@@ -195,7 +215,7 @@ Remove `initialRevision` from `initialize(db, worker, options, initialRevision, 
 - The host application must provide a DuckDB-Wasm version and a matching `wasm_eh` catalog extension binary.
 - The extension build uses the DuckDB commit and Emscripten versions specified in `versions.lock`; these build inputs are separate from the DuckDB-Wasm version selected by the host application.
 - Read-only catalog; DuckDB-side catalog mutation is rejected.
-- `format_version: 2` only.
+- `format_version: 2` supports tables; `format_version: 3` adds views.
 - Parquet is the only supported scanner.
 - Parquet scanner options must currently be empty.
 - The host must provide complete column metadata; schema inference is not performed by the catalog.

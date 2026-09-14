@@ -4,6 +4,7 @@
   const OPEN_SESSION = 'IN_MEMORY_CATALOG_OPEN_WORKSPACE_SESSION'
   const REPLACE_SNAPSHOT = 'IN_MEMORY_CATALOG_REPLACE_SNAPSHOT'
   const REPLACE_TABLE = 'IN_MEMORY_CATALOG_REPLACE_TABLE'
+  const REPLACE_VIEW = 'IN_MEMORY_CATALOG_REPLACE_VIEW'
   const DROP_WORKSPACE = 'IN_MEMORY_CATALOG_DROP_WORKSPACE'
   const GET_DIAGNOSTICS = 'IN_MEMORY_CATALOG_GET_DIAGNOSTICS'
 
@@ -26,12 +27,27 @@
         })
       },
 
+      lookupView(workspaceId, revision, schemaName, viewName) {
+        const view = store.lookupView(workspaceId, revision, schemaName, viewName)
+        if (!view) return undefined
+        return JSON.stringify({
+          catalog_revision: revision,
+          schema_name: schemaName,
+          view_name: viewName,
+          query: view.query,
+        })
+      },
+
       listSchemas(workspaceId, revision) {
         return JSON.stringify(store.listSchemas(workspaceId, revision))
       },
 
       listTables(workspaceId, revision, schemaName) {
         return JSON.stringify(store.listTables(workspaceId, revision, schemaName))
+      },
+
+      listViews(workspaceId, revision, schemaName) {
+        return JSON.stringify(store.listViews(workspaceId, revision, schemaName))
       },
 
       diagnostics() {
@@ -102,6 +118,26 @@
       } catch (error) {
         port.postMessage({
           type: 'IN_MEMORY_CATALOG_REPLACE_TABLE_RESULT',
+          request_id: requestId,
+          ok: false,
+          code: errorCode(error),
+          message: safeOperationErrorMessage(error),
+        })
+      }
+      return
+    }
+
+    if (message?.type === REPLACE_VIEW) {
+      try {
+        await session.replaceCatalogView(message.schema_name, message.view)
+        port.postMessage({
+          type: 'IN_MEMORY_CATALOG_REPLACE_VIEW_RESULT',
+          request_id: requestId,
+          ok: true,
+        })
+      } catch (error) {
+        port.postMessage({
+          type: 'IN_MEMORY_CATALOG_REPLACE_VIEW_RESULT',
           request_id: requestId,
           ok: false,
           code: errorCode(error),

@@ -61,7 +61,37 @@ await catalog.replaceTable('main', {
 
 The schema name and table's `name` identify the target. A missing target is an error. Other tables remain unchanged and are neither retransmitted nor revalidated.
 
-`publishSnapshot()` and `replaceTable()` share a queue and run in call order. The target is resolved against the catalog when the operation runs. A later complete publication replaces the entire catalog, including earlier table updates. Failed validation preserves the current state and allows subsequent updates to continue.
+`publishSnapshot()`, `replaceTable()`, and `replaceView()` share a queue and run in call order. The target is resolved against the catalog when the operation runs. A later complete publication replaces the entire catalog, including earlier relation updates. Failed validation preserves the current state and allows subsequent updates to continue.
+
+## Publish and update views
+
+Use `format_version: 3` and define each view with a name and one `SELECT` query:
+
+```js
+const snapshot = {
+  format_version: 3,
+  schemas: [{
+    name: 'main',
+    tables,
+    views: [{
+      name: 'active_events',
+      query: 'SELECT * FROM events WHERE active',
+    }],
+  }],
+}
+await catalog.publishSnapshot(snapshot)
+```
+
+To update an existing view without retransmitting the catalog, replace its complete definition:
+
+```js
+await catalog.replaceView('main', {
+  name: 'active_events',
+  query: 'SELECT * FROM events WHERE active AND category IS NOT NULL',
+})
+```
+
+Names are matched case-insensitively. Use `publishSnapshot()` to add, remove, or rename a view. DuckDB reports syntax errors, missing relations, incompatible references, and circular dependencies when it binds the view for a query.
 
 ## Query a catalog
 

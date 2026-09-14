@@ -28,6 +28,23 @@ function snapshot(uri = 'https://example.test/table') {
   }
 }
 
+function viewSnapshot() {
+  return {
+    format_version: 3,
+    schemas: [{
+      name: 'main',
+      tables: [{
+        name: 'table1',
+        snapshot: 'snapshot-1',
+        scanner: { type: 'parquet', options: {} },
+        columns: [{ name: 'id', type: 'BIGINT', nullable: false }],
+        files: [{ uri: 'https://example.test/table' }],
+      }],
+      views: [{ name: 'view1', query: 'SELECT id FROM table1' }],
+    }],
+  }
+}
+
 function fakeDatabase() {
   const queries = []
   const connection = {
@@ -249,6 +266,27 @@ describe('InMemoryCatalogController', () => {
       const finalTable = store.lookupTable('workspace', '5', 'main', 'table1')
       assert.equal(finalTable.snapshot, 'snapshot-final-full')
       assert.equal(finalTable.files[0].uri, 'https://example.test/final-full')
+    } finally {
+      await controller.close()
+    }
+  })
+
+  it('replaces one view through the dedicated worker operation and captures input before queueing', async () => {
+    const store = new InMemoryCatalogMetadataStore()
+    const worker = runtimeWorker(createInMemoryCatalogWorkerRuntime(store))
+    const { db } = fakeDatabase()
+    const controller = await InMemoryCatalogController.initialize(
+      db, worker, { workspaceId: 'workspace', catalogName: 'dataset', ackTimeoutMs: 100 }, viewSnapshot(),
+    )
+
+    try {
+      const candidate = { name: 'VIEW1', query: 'SELECT id FROM table1 WHERE id > 10' }
+      const replacement = controller.replaceView('MAIN', candidate)
+      candidate.query = 'SELECT id FROM table1 WHERE id > 20'
+      await replacement
+
+      assert.equal(store.lookupView('workspace', '2', 'main', 'view1').query,
+        'SELECT id FROM table1 WHERE id > 10')
     } finally {
       await controller.close()
     }

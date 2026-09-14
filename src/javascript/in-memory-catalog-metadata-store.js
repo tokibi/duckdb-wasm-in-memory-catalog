@@ -107,22 +107,98 @@
           const tables = schema.metadata.tables.slice()
           tables[schema.tablePositions.get(tableKey)] = replacement
           const metadata = deepFreeze({ name: schema.metadata.name, tables })
+          const replacementMetadata = current.snapshot.format_version === 3
+            ? deepFreeze({ name: schema.metadata.name, tables, views: schema.metadata.views })
+            : metadata
           const tableIndex = new Map(schema.tables)
           tableIndex.set(tableKey, replacement)
           const replacementSchema = Object.freeze({
-            metadata,
+            metadata: replacementMetadata,
             tables: tableIndex,
             tablePositions: schema.tablePositions,
+            views: schema.views,
+            viewPositions: schema.viewPositions,
           })
 
           const schemas = current.snapshot.schemas.slice()
-          schemas[current.schemaPositions.get(indexKey(schema.metadata.name))] = metadata
-          const snapshot = deepFreeze({ format_version: 2, schemas })
+          schemas[current.schemaPositions.get(indexKey(schema.metadata.name))] = replacementMetadata
+          const snapshot = makeSnapshot(current.snapshot.format_version, schemas)
           const schemaIndex = new Map(current.schemas)
           schemaIndex.set(indexKey(schema.metadata.name), replacementSchema)
 
           // Internal generation: DuckDB cache invalidation and bridge consistency only.
           // Application state ordering follows publication order, not this counter.
+          const revision = (current.revision ?? 0n) + 1n
+          if (revision > MAX_UINT64) {
+            throw new InMemoryCatalogError(
+              'RC_METADATA_GENERATION_EXHAUSTED',
+              'Catalog internal generation is exhausted; reopen the workspace',
+            )
+          }
+          record.current = Object.freeze({
+            revision,
+            snapshot,
+            schemas: schemaIndex,
+            schemaPositions: current.schemaPositions,
+          })
+        })
+        record.pending = operation.catch(() => {})
+        return operation
+      }
+
+      const replaceCatalogView = (schemaName, view) => {
+        if (record.closing) return Promise.reject(closedWorkspaceError())
+        let normalizedSchemaName
+        let candidate
+        try {
+          normalizedSchemaName = requireName(schemaName, 'schema_name')
+          candidate = normalizeView(view, 'view', new Set())
+        } catch (error) {
+          return Promise.reject(error)
+        }
+        const operation = record.pending.then(() => {
+          const current = record.current
+          const schema = current?.schemas.get(indexKey(normalizedSchemaName))
+          if (!schema) {
+            throw new InMemoryCatalogError(
+              'RC_CATALOG_SCHEMA_NOT_FOUND',
+              `Catalog schema ${normalizedSchemaName} was not found`,
+            )
+          }
+
+          const viewKey = indexKey(candidate.name)
+          const previousView = schema.views.get(viewKey)
+          if (!previousView) {
+            throw new InMemoryCatalogError(
+              'RC_CATALOG_VIEW_NOT_FOUND',
+              `Catalog view ${normalizedSchemaName}.${candidate.name} was not found`,
+            )
+          }
+
+          const replacement = deepFreeze({ ...candidate, name: previousView.name })
+          const views = schema.metadata.views.slice()
+          views[schema.viewPositions.get(viewKey)] = replacement
+          const metadata = deepFreeze({
+            name: schema.metadata.name,
+            tables: schema.metadata.tables,
+            views,
+          })
+          const viewIndex = new Map(schema.views)
+          viewIndex.set(viewKey, replacement)
+          const replacementSchema = Object.freeze({
+            metadata,
+            tables: schema.tables,
+            tablePositions: schema.tablePositions,
+            views: viewIndex,
+            viewPositions: schema.viewPositions,
+          })
+
+          const schemas = current.snapshot.schemas.slice()
+          schemas[current.schemaPositions.get(indexKey(schema.metadata.name))] = metadata
+          const snapshot = makeSnapshot(3, schemas)
+          const schemaIndex = new Map(current.schemas)
+          schemaIndex.set(indexKey(schema.metadata.name), replacementSchema)
+
           const revision = (current.revision ?? 0n) + 1n
           if (revision > MAX_UINT64) {
             throw new InMemoryCatalogError(
@@ -156,6 +232,7 @@
       return Object.freeze({
         replaceCatalogSnapshot,
         replaceCatalogTable,
+        replaceCatalogView,
         dropCatalogWorkspace,
         diagnostics: () => this.diagnostics(),
       })
@@ -177,6 +254,12 @@
       return table
     }
 
+    lookupView(workspaceId, revision, schemaName, viewName) {
+      this.#fullLookupCount += 1
+      return this.#snapshotAtRevision(workspaceId, revision)
+        ?.schemas.get(indexKey(schemaName))?.views.get(indexKey(viewName))
+    }
+
     listSchemas(workspaceId, revision) {
       const published = this.#snapshotAtRevision(workspaceId, revision)
       return published ? published.snapshot.schemas.map((schema) => schema.name) : []
@@ -188,6 +271,15 @@
       return schema ? schema.metadata.tables.map((table) => ({
         name: table.name,
         columns: table.columns,
+      })) : []
+    }
+
+    listViews(workspaceId, revision, schemaName) {
+      const schema = this.#snapshotAtRevision(workspaceId, revision)
+        ?.schemas.get(indexKey(schemaName))
+      return schema ? (schema.metadata.views ?? []).map((view) => ({
+        name: view.name,
+        query: view.query,
       })) : []
     }
 
@@ -221,10 +313,10 @@
 
   function normalizeSnapshot(input) {
     if (!isRecord(input)) invalid('snapshot must be an object')
-    if (input.format_version !== 2) {
+    if (input.format_version !== 2 && input.format_version !== 3) {
       throw new InMemoryCatalogError(
         'RC_METADATA_VERSION',
-        'Catalog snapshot format_version must be 2',
+        'Catalog snapshot format_version must be 2 or 3',
       )
     }
     if (!Array.isArray(input.schemas) || input.schemas.length === 0) {
@@ -237,28 +329,57 @@
       const path = `schemas[${schemaIndexValue}]`
       if (!isRecord(schema)) invalid(`${path} must be an object`)
       const name = uniqueName(schema.name, schemaNames, `${path}.name`)
-      if (!Array.isArray(schema.tables) || schema.tables.length === 0) {
+      if (input.format_version === 2 && (!Array.isArray(schema.tables) || schema.tables.length === 0)) {
         invalid(`schema ${name} must contain at least one table`)
       }
+      if (input.format_version === 2 && schema.views !== undefined) {
+        throw new InMemoryCatalogError(
+          'RC_METADATA_VERSION',
+          'Catalog views require snapshot format_version 3',
+        )
+      }
+      const rawTables = schema.tables === undefined ? [] : schema.tables
+      const rawViews = schema.views === undefined ? [] : schema.views
+      if (!Array.isArray(rawTables)) invalid(`schema ${name}.tables must be an array`)
+      if (!Array.isArray(rawViews)) invalid(`schema ${name}.views must be an array`)
+      if (input.format_version === 3 && rawTables.length + rawViews.length === 0) {
+        invalid(`schema ${name} must contain at least one table or view`)
+      }
 
-      const tableNames = new Set()
+      const relationNames = new Set()
       const tableIndex = new Map()
       const tablePositions = new Map()
-      const tables = schema.tables.map((table, tableIndexValue) => {
+      const tables = rawTables.map((table, tableIndexValue) => {
         const normalized = normalizeTable(
           table,
           `${path}.tables[${tableIndexValue}]`,
-          tableNames,
+          relationNames,
         )
         tableIndex.set(indexKey(normalized.name), normalized)
         tablePositions.set(indexKey(normalized.name), tableIndexValue)
         return normalized
       })
-      const metadata = deepFreeze({ name, tables })
+      const viewIndex = new Map()
+      const viewPositions = new Map()
+      const views = rawViews.map((view, viewIndexValue) => {
+        const normalized = normalizeView(
+          view,
+          `${path}.views[${viewIndexValue}]`,
+          relationNames,
+        )
+        viewIndex.set(indexKey(normalized.name), normalized)
+        viewPositions.set(indexKey(normalized.name), viewIndexValue)
+        return normalized
+      })
+      const metadata = input.format_version === 3
+        ? deepFreeze({ name, tables, views })
+        : deepFreeze({ name, tables })
       schemaIndex.set(indexKey(name), Object.freeze({
         metadata,
         tables: tableIndex,
         tablePositions,
+        views: viewIndex,
+        viewPositions,
       }))
       return metadata
     })
@@ -268,7 +389,7 @@
     )
 
     return {
-      snapshot: deepFreeze({ format_version: 2, schemas: normalizedSchemas }),
+      snapshot: makeSnapshot(input.format_version, normalizedSchemas),
       schemas: schemaIndex,
       schemaPositions,
     }
@@ -311,6 +432,20 @@
     })
 
     return deepFreeze({ name, snapshot, scanner, columns, files })
+  }
+
+  function normalizeView(input, path, relationNames) {
+    if (!isRecord(input) || !hasExactKeys(input, ['name', 'query'])) {
+      invalid(`${path} must contain only name and query`)
+    }
+    const name = uniqueName(input.name, relationNames, `${path}.name`)
+    const query = requireName(input.query, `${path}.query`)
+    if (query.trim().length === 0) invalid(`${path}.query must not be empty`)
+    return deepFreeze({ name, query })
+  }
+
+  function makeSnapshot(formatVersion, schemas) {
+    return deepFreeze({ format_version: formatVersion, schemas })
   }
 
   function normalizeScanner(input, path) {

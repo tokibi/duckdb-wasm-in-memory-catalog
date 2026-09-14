@@ -23,6 +23,23 @@ function snapshot(uri = 'https://example.test/table') {
   }
 }
 
+function viewSnapshot() {
+  return {
+    format_version: 3,
+    schemas: [{
+      name: 'main',
+      tables: [{
+        name: 'table1',
+        snapshot: 'snapshot-1',
+        scanner: { type: 'parquet', options: {} },
+        columns: [{ name: 'id', type: 'BIGINT', nullable: false }],
+        files: [{ uri: 'https://example.test/table' }],
+      }],
+      views: [{ name: 'view1', query: 'SELECT id FROM table1' }],
+    }],
+  }
+}
+
 class FakePort {
   messages = []
   closed = false
@@ -113,6 +130,45 @@ describe('In-Memory Catalog Worker runtime', () => {
       JSON.parse(runtime.bridge.lookupTable('workspace', '2', 'main', 'table1')).snapshot,
       'snapshot-update',
     )
+  })
+
+  it('exposes view descriptors and acknowledges a dedicated view replacement', async () => {
+    const store = new InMemoryCatalogMetadataStore()
+    const runtime = createInMemoryCatalogWorkerRuntime(store)
+    const port = new FakePort()
+    await runtime.handleMessage({
+      data: { type: 'IN_MEMORY_CATALOG_OPEN_WORKSPACE_SESSION', workspace_id: 'workspace' },
+      ports: [port],
+    })
+    await port.dispatch({
+      type: 'IN_MEMORY_CATALOG_REPLACE_SNAPSHOT',
+      request_id: 'replace-1',
+      snapshot: viewSnapshot(),
+    })
+
+    assert.deepEqual(JSON.parse(runtime.bridge.listViews('workspace', '1', 'main')), [
+      { name: 'view1', query: 'SELECT id FROM table1' },
+    ])
+    assert.deepEqual(JSON.parse(runtime.bridge.lookupView('workspace', '1', 'main', 'VIEW1')), {
+      catalog_revision: '1',
+      schema_name: 'main',
+      view_name: 'VIEW1',
+      query: 'SELECT id FROM table1',
+    })
+
+    await port.dispatch({
+      type: 'IN_MEMORY_CATALOG_REPLACE_VIEW',
+      request_id: 'replace-view-1',
+      schema_name: 'MAIN',
+      view: { name: 'VIEW1', query: 'SELECT id FROM table1 WHERE id > 1' },
+    })
+    assert.deepEqual(port.messages.at(-1), {
+      type: 'IN_MEMORY_CATALOG_REPLACE_VIEW_RESULT',
+      request_id: 'replace-view-1',
+      ok: true,
+    })
+    assert.equal(JSON.parse(runtime.bridge.lookupView('workspace', '2', 'main', 'view1')).query,
+      'SELECT id FROM table1 WHERE id > 1')
   })
 
   it('drops a published workspace before acknowledging and closes the port', async () => {

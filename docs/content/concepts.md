@@ -12,7 +12,7 @@ The in-memory catalog is a read-only projection of metadata owned by the host ap
 ```text
 application state
       │
-      │ catalog snapshot / table replacement
+      │ catalog snapshot / relation replacement
       ▼
 Catalog controller
       │
@@ -20,7 +20,7 @@ Catalog controller
       ▼
 Dedicated Worker metadata store
       │
-      │ table lookup
+      │ table or view lookup
       ▼
 in_memory_catalog extension
       │
@@ -28,15 +28,21 @@ in_memory_catalog extension
 DuckDB-Wasm
 ```
 
-The application remains authoritative. DuckDB sees schemas, tables, and columns as normal catalog objects, but it does not own their definition.
+The application remains authoritative. DuckDB sees schemas, tables, views, and columns as normal catalog objects, but it does not own their definition.
 
 ## Catalog updates
 
-`publishSnapshot()` submits the complete catalog state; `replaceTable()` submits only one existing table’s complete definition. The controller copies the input at call time and sends publications to the Worker in call order. The Worker validates the submitted metadata before atomically updating the current state. Failed validation leaves the current state unchanged.
+`publishSnapshot()` submits the complete catalog state. `replaceTable()` and `replaceView()` submit one existing relation's complete definition. The controller copies the input at call time and sends publications to the Worker in call order. The Worker validates the submitted metadata before atomically updating the current state. Failed validation leaves the current state unchanged.
 
-Successful operations update the catalog in call order. A complete publication replaces the entire state; a table replacement preserves other tables. If asynchronous application work produces snapshots out of order, discard stale results before publishing them.
+Successful operations update the catalog in call order. A complete publication replaces the entire state; a relation replacement preserves other tables and views. If asynchronous application work produces snapshots out of order, discard stale results before publishing them.
 
 The Worker automatically maintains an internal counter for DuckDB metadata invalidation and generation checks during reads. Every successful publication advances it, including identical content; failed validation does not. Applications do not manage this counter.
+
+## Views
+
+`format_version: 3` can publish views alongside tables. A view contains a name and one `SELECT` query; DuckDB binds that query and derives its columns and types when the view is used. Views can refer to catalog tables and other views. Invalid queries and circular view dependencies produce query errors without changing the published snapshot.
+
+The internal catalog generation also invalidates bound view entries. After `publishSnapshot()`, `replaceTable()`, or `replaceView()` succeeds, the next query binds affected views from the current definitions.
 
 ## Table snapshot
 
@@ -95,4 +101,4 @@ The host owns the DuckDB Worker and database lifecycle. The controller owns only
 
 DuckDB-side catalog mutation is intentionally unsupported. Allowing DuckDB-side DDL to diverge from the application's model would create two competing sources of truth.
 
-When the application changes a dataset, update the application state and submit it with `publishSnapshot()` or `replaceTable()`.
+When the application changes a dataset or view, update the application state and submit it with `publishSnapshot()`, `replaceTable()`, or `replaceView()`.

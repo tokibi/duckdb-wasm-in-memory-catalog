@@ -3,6 +3,7 @@
 #include "duckdb/catalog/catalog_entry/schema_catalog_entry.hpp"
 #include "duckdb/catalog/catalog_entry/table_catalog_entry.hpp"
 #include "duckdb/catalog/catalog_entry/table_function_catalog_entry.hpp"
+#include "duckdb/catalog/catalog_entry/view_catalog_entry.hpp"
 #include "duckdb/catalog/duck_catalog.hpp"
 #include "duckdb/common/complex_json.hpp"
 #include "duckdb/common/file_system.hpp"
@@ -18,6 +19,7 @@
 #include "duckdb/parser/parsed_data/attach_info.hpp"
 #include "duckdb/parser/parsed_data/create_schema_info.hpp"
 #include "duckdb/parser/parsed_data/create_table_info.hpp"
+#include "duckdb/parser/parsed_data/create_view_info.hpp"
 #include "duckdb/parser/constraints/not_null_constraint.hpp"
 #include "duckdb/storage/database_size.hpp"
 #include "duckdb/storage/storage_extension.hpp"
@@ -28,7 +30,9 @@
 #include "parquet_multi_file_info.hpp"
 
 #include <atomic>
+#include <cstdint>
 #include <mutex>
+#include <optional>
 #include <unordered_set>
 
 #ifdef __EMSCRIPTEN__
@@ -57,6 +61,14 @@ struct CatalogTableDescriptor {
 	string snapshot_id;
 	vector<CatalogColumnMetadata> columns;
 	vector<CatalogFileMetadata> files;
+};
+
+struct CatalogViewDescriptor {
+	string workspace;
+	uint64_t catalog_revision;
+	string schema_name;
+	string view_name;
+	string query;
 };
 
 std::atomic<uint64_t> catalog_table_entry_count {0};
@@ -136,11 +148,51 @@ EM_JS(int, InMemoryCatalogListTables,
 	stringToUTF8(encoded, output, output_size);
 	return required;
 });
+
+EM_JS(int, InMemoryCatalogLookupView,
+      (const char *workspace_ptr, const char *revision_ptr, const char *schema_ptr,
+       const char *view_ptr, char *output, int output_size), {
+	const bridge = globalThis.DUCKDB_IN_MEMORY_CATALOG;
+	if (!bridge || typeof bridge.lookupView !== 'function') return 0;
+	let descriptor;
+	try {
+		descriptor = bridge.lookupView(
+			UTF8ToString(workspace_ptr), UTF8ToString(revision_ptr),
+			UTF8ToString(schema_ptr), UTF8ToString(view_ptr));
+	} catch (error) {
+		return error && error.code === 'RC_METADATA_REVISION_CHANGED' ? -1 : -2;
+	}
+	if (descriptor === undefined || descriptor === null) return 0;
+	const required = lengthBytesUTF8(descriptor) + 1;
+	if (!output) return required;
+	if (output_size < required) return -required;
+	stringToUTF8(descriptor, output, output_size);
+	return required;
+});
+
+EM_JS(int, InMemoryCatalogListViews,
+      (const char *workspace_ptr, const char *revision_ptr, const char *schema_ptr,
+       char *output, int output_size), {
+	const bridge = globalThis.DUCKDB_IN_MEMORY_CATALOG;
+	if (!bridge || typeof bridge.listViews !== 'function') return 0;
+	let encoded;
+	try {
+		encoded = bridge.listViews(
+			UTF8ToString(workspace_ptr), UTF8ToString(revision_ptr), UTF8ToString(schema_ptr));
+	} catch (error) {
+		return error && error.code === 'RC_METADATA_REVISION_CHANGED' ? -1 : -2;
+	}
+	const required = lengthBytesUTF8(encoded) + 1;
+	if (!output) return required;
+	if (output_size < required) return -required;
+	stringToUTF8(encoded, output, output_size);
+	return required;
+});
 // clang-format on
 #endif
 
 [[noreturn]] static void DescriptorInvalid() {
-	throw InvalidInputException("RC_METADATA_INVALID: Worker table descriptor is invalid");
+	throw InvalidInputException("RC_METADATA_INVALID: Worker catalog descriptor is invalid");
 }
 
 static string JSONString(yyjson_val *object, const char *key) {
@@ -258,6 +310,33 @@ static shared_ptr<const CatalogTableDescriptor> DecodeProductionDescriptor(const
 	return descriptor;
 }
 
+static shared_ptr<const CatalogViewDescriptor> DecodeProductionViewDescriptor(const string &workspace,
+	                                                                           uint64_t expected_revision,
+	                                                                           const string &schema_name,
+	                                                                           const string &view_name,
+	                                                                           const string &json) {
+	yyjson_doc *document = yyjson_read(json.c_str(), json.size(), 0);
+	if (!document) {
+		DescriptorInvalid();
+	}
+	std::unique_ptr<yyjson_doc, decltype(&yyjson_doc_free)> document_guard(document, yyjson_doc_free);
+	auto root = yyjson_doc_get_root(document);
+	if (!root || !yyjson_is_obj(root) || yyjson_obj_size(root) != 4) {
+		DescriptorInvalid();
+	}
+	auto descriptor = make_shared_ptr<CatalogViewDescriptor>();
+	descriptor->workspace = workspace;
+	descriptor->catalog_revision = ParseCatalogRevision(JSONString(root, "catalog_revision"));
+	descriptor->schema_name = JSONString(root, "schema_name");
+	descriptor->view_name = JSONString(root, "view_name");
+	descriptor->query = JSONString(root, "query");
+	if (descriptor->catalog_revision != expected_revision || descriptor->schema_name != schema_name ||
+	    descriptor->view_name != view_name || descriptor->query.empty() || descriptor->query.find('\0') != string::npos) {
+		DescriptorInvalid();
+	}
+	return descriptor;
+}
+
 static std::optional<uint64_t> GetProductionSnapshotRevision(const string &workspace) {
 #ifdef __EMSCRIPTEN__
 	auto required = InMemoryCatalogSnapshotRevision(workspace.c_str(), nullptr, 0);
@@ -306,6 +385,39 @@ static shared_ptr<const CatalogTableDescriptor> LookupProductionDescriptor(const
 	}
 	return DecodeProductionDescriptor(workspace, revision, schema_name, table_name,
 	                                  string(encoded.data(), static_cast<idx_t>(written - 1)));
+#else
+	return nullptr;
+#endif
+}
+
+static shared_ptr<const CatalogViewDescriptor> LookupProductionViewDescriptor(const string &workspace,
+	                                                                          uint64_t revision,
+	                                                                          const string &schema_name,
+	                                                                          const string &view_name) {
+#ifdef __EMSCRIPTEN__
+	auto revision_text = to_string(revision);
+	auto required = InMemoryCatalogLookupView(workspace.c_str(), revision_text.c_str(), schema_name.c_str(),
+	                                          view_name.c_str(), nullptr, 0);
+	if (required == 0) {
+		return nullptr;
+	}
+	if (required == -1) {
+		throw InvalidInputException("RC_METADATA_REVISION_CHANGED: Catalog revision changed during view lookup");
+	}
+	if (required < 2) {
+		DescriptorInvalid();
+	}
+	vector<char> encoded(static_cast<idx_t>(required));
+	auto written = InMemoryCatalogLookupView(workspace.c_str(), revision_text.c_str(), schema_name.c_str(),
+	                                         view_name.c_str(), encoded.data(), required);
+	if (written == -1) {
+		throw InvalidInputException("RC_METADATA_REVISION_CHANGED: Catalog revision changed during view lookup");
+	}
+	if (written != required) {
+		DescriptorInvalid();
+	}
+	return DecodeProductionViewDescriptor(workspace, revision, schema_name, view_name,
+	                                      string(encoded.data(), static_cast<idx_t>(written - 1)));
 #else
 	return nullptr;
 #endif
@@ -374,6 +486,41 @@ static vector<shared_ptr<const CatalogTableDescriptor>> DecodeTableList(const st
 	return descriptors;
 }
 
+static vector<shared_ptr<const CatalogViewDescriptor>> DecodeViewList(const string &workspace, uint64_t revision,
+	                                                                   const string &schema_name, const string &json) {
+	yyjson_doc *document = yyjson_read(json.c_str(), json.size(), 0);
+	if (!document) {
+		DescriptorInvalid();
+	}
+	std::unique_ptr<yyjson_doc, decltype(&yyjson_doc_free)> document_guard(document, yyjson_doc_free);
+	auto root = yyjson_doc_get_root(document);
+	if (!root || !yyjson_is_arr(root)) {
+		DescriptorInvalid();
+	}
+	vector<shared_ptr<const CatalogViewDescriptor>> descriptors;
+	unordered_set<string> keys;
+	size_t index, count;
+	yyjson_val *value;
+	yyjson_arr_foreach(root, index, count, value) {
+		if (!yyjson_is_obj(value) || yyjson_obj_size(value) != 2) {
+			DescriptorInvalid();
+		}
+		auto descriptor = make_shared_ptr<CatalogViewDescriptor>();
+		descriptor->workspace = workspace;
+		descriptor->catalog_revision = revision;
+		descriptor->schema_name = schema_name;
+		descriptor->view_name = JSONString(value, "name");
+		descriptor->query = JSONString(value, "query");
+		if (descriptor->view_name.empty() || descriptor->view_name.find('\0') != string::npos ||
+		    descriptor->query.empty() || descriptor->query.find('\0') != string::npos ||
+		    !keys.insert(StringUtil::Lower(descriptor->view_name)).second) {
+			DescriptorInvalid();
+		}
+		descriptors.push_back(std::move(descriptor));
+	}
+	return descriptors;
+}
+
 static void CheckEnumerationResult(int result) {
 	if (result == -1) {
 		throw InvalidInputException("RC_METADATA_REVISION_CHANGED: Catalog revision changed during enumeration");
@@ -421,6 +568,26 @@ static vector<shared_ptr<const CatalogTableDescriptor>> ListProductionTables(con
 #endif
 }
 
+static vector<shared_ptr<const CatalogViewDescriptor>> ListProductionViews(const string &workspace, uint64_t revision,
+	                                                                        const string &schema_name) {
+#ifdef __EMSCRIPTEN__
+	auto revision_text = to_string(revision);
+	auto required = InMemoryCatalogListViews(workspace.c_str(), revision_text.c_str(), schema_name.c_str(), nullptr, 0);
+	CheckEnumerationResult(required);
+	vector<char> encoded(static_cast<idx_t>(required));
+	auto written = InMemoryCatalogListViews(workspace.c_str(), revision_text.c_str(), schema_name.c_str(), encoded.data(),
+	                                       required);
+	if (written != required) {
+		CheckEnumerationResult(written);
+		DescriptorInvalid();
+	}
+	return DecodeViewList(workspace, revision, schema_name,
+	                      string(encoded.data(), static_cast<idx_t>(written - 1)));
+#else
+	return {};
+#endif
+}
+
 static bool HasQueryVisibleSnapshot(const string &workspace) {
 	return GetProductionSnapshotRevision(workspace).has_value();
 }
@@ -443,6 +610,19 @@ static shared_ptr<const CatalogTableDescriptor> LookupQueryVisibleTable(const st
 	                                                                    const string &schema_name,
 	                                                                    const string &table_name) {
 	return LookupProductionDescriptor(workspace, revision, schema_name, table_name);
+}
+
+static vector<shared_ptr<const CatalogViewDescriptor>> ListQueryVisibleViews(const string &workspace,
+	                                                                          uint64_t revision,
+	                                                                          const string &schema_name) {
+	return ListProductionViews(workspace, revision, schema_name);
+}
+
+static shared_ptr<const CatalogViewDescriptor> LookupQueryVisibleView(const string &workspace,
+	                                                                    uint64_t revision,
+	                                                                    const string &schema_name,
+	                                                                    const string &view_name) {
+	return LookupProductionViewDescriptor(workspace, revision, schema_name, view_name);
 }
 
 static void RecordCatalogTableEntryCreated() {
@@ -539,6 +719,24 @@ static void CatalogParquetScan(ClientContext &context, TableFunctionInput &input
 		}
 		throw;
 	}
+}
+
+static unique_ptr<ViewCatalogEntry> MakeInMemoryViewEntry(ClientContext &context, Catalog &catalog,
+	                                                        SchemaCatalogEntry &schema,
+	                                                        const CatalogViewDescriptor &descriptor) {
+	auto info = make_uniq<CreateViewInfo>(schema, descriptor.view_name);
+	info->sql = descriptor.query;
+	try {
+		info = CreateViewInfo::FromSelect(context, std::move(info));
+	} catch (const Exception &error) {
+		auto message = string(error.what());
+		if (message.find("RC_CATALOG_VIEW_CYCLE:") != string::npos ||
+		    message.find("RC_METADATA_REVISION_CHANGED:") != string::npos) {
+			throw;
+		}
+		throw InvalidInputException("RC_CATALOG_VIEW_INVALID: %s", error.what());
+	}
+	return make_uniq<ViewCatalogEntry>(catalog, schema, *info);
 }
 
 class InMemoryTableEntry : public TableCatalogEntry {
@@ -653,17 +851,25 @@ public:
 		catalog_schema_entry_count--;
 	}
 
-	void Scan(ClientContext &, CatalogType type, const std::function<void(CatalogEntry &)> &callback) override {
-		ScanInternal(type, callback);
+	void Scan(ClientContext &context, CatalogType type, const std::function<void(CatalogEntry &)> &callback) override {
+		ScanInternal(&context, type, callback);
 	}
 	void Scan(CatalogType type, const std::function<void(CatalogEntry &)> &callback) override {
-		ScanInternal(type, callback);
+		ScanInternal(nullptr, type, callback);
 	}
-	optional_ptr<CatalogEntry> LookupEntry(CatalogTransaction, const EntryLookupInfo &lookup) override {
-		if (lookup.GetCatalogType() != CatalogType::TABLE_ENTRY) {
-			return nullptr;
+	optional_ptr<CatalogEntry> LookupEntry(CatalogTransaction transaction, const EntryLookupInfo &lookup) override {
+		if (lookup.GetCatalogType() == CatalogType::TABLE_ENTRY) {
+			auto table = GetCurrentEntry(lookup.GetEntryName());
+			if (table) {
+				return table;
+			}
 		}
-		return GetCurrentEntry(lookup.GetEntryName());
+		if ((lookup.GetCatalogType() == CatalogType::TABLE_ENTRY ||
+		     lookup.GetCatalogType() == CatalogType::VIEW_ENTRY) && transaction.HasContext()) {
+			auto view = GetCurrentViewEntry(transaction.GetContext(), lookup.GetEntryName());
+			return view ? optional_ptr<CatalogEntry>(view.get()) : nullptr;
+		}
+		return nullptr;
 	}
 
 	optional_ptr<CatalogEntry> CreateIndex(CatalogTransaction, CreateIndexInfo &, TableCatalogEntry &) override {
@@ -717,16 +923,22 @@ private:
 	static optional_ptr<CatalogEntry> ReadOnly() {
 		throw NotImplementedException("RC_READ_ONLY: in_memory_catalog is read-only");
 	}
-	void ScanInternal(CatalogType type, const std::function<void(CatalogEntry &)> &callback) {
-		if (type != CatalogType::TABLE_ENTRY) {
+	void ScanInternal(ClientContext *context, CatalogType type, const std::function<void(CatalogEntry &)> &callback) {
+		if (type != CatalogType::TABLE_ENTRY && type != CatalogType::VIEW_ENTRY) {
 			return;
 		}
 		auto revision = GetQueryVisibleRevision(workspace);
 		if (!revision) {
 			return;
 		}
-		for (const auto &descriptor : ListQueryVisibleTables(workspace, *revision, schema_name)) {
-			callback(*GetEnumerationEntry(descriptor, *revision));
+		if (type == CatalogType::TABLE_ENTRY) {
+			for (const auto &descriptor : ListQueryVisibleTables(workspace, *revision, schema_name)) {
+				callback(*GetEnumerationEntry(descriptor, *revision));
+			}
+		} else if (context) {
+			for (const auto &descriptor : ListQueryVisibleViews(workspace, *revision, schema_name)) {
+				callback(*GetEnumerationViewEntry(*context, descriptor, *revision));
+			}
 		}
 	}
 	optional_ptr<CatalogEntry> GetCurrentEntry(const string &table_name) {
@@ -762,6 +974,73 @@ private:
 		}
 		return entry->second.get();
 	}
+	optional_ptr<ViewCatalogEntry> GetCurrentViewEntry(ClientContext &context, const string &view_name) {
+		auto revision = GetQueryVisibleRevision(workspace);
+		if (!revision) {
+			return nullptr;
+		}
+		return GetViewEntryAtRevision(context, view_name, *revision);
+	}
+	optional_ptr<ViewCatalogEntry> GetViewEntryAtRevision(ClientContext &context, const string &view_name,
+	                                                     uint64_t revision) {
+		auto key = StringUtil::Lower(view_name);
+		{
+			lock_guard<mutex> guard(entries_lock);
+			AdvanceRevision(revision);
+			auto entry = views.find(key);
+			if (entry != views.end()) {
+				return entry->second.get();
+			}
+		}
+		auto descriptor = LookupQueryVisibleView(workspace, revision, schema_name, view_name);
+		return descriptor ? GetOrCreateViewEntry(context, std::move(descriptor), revision) : nullptr;
+	}
+	ViewCatalogEntry *GetEnumerationViewEntry(ClientContext &context,
+	                                          shared_ptr<const CatalogViewDescriptor> descriptor,
+	                                          uint64_t revision) {
+		return GetOrCreateViewEntry(context, std::move(descriptor), revision);
+	}
+	ViewCatalogEntry *GetOrCreateViewEntry(ClientContext &context,
+	                                       shared_ptr<const CatalogViewDescriptor> descriptor,
+	                                       uint64_t revision) {
+		auto key = StringUtil::Lower(descriptor->view_name);
+		{
+			lock_guard<mutex> guard(entries_lock);
+			AdvanceRevision(revision);
+			auto entry = views.find(key);
+			if (entry != views.end()) {
+				return entry->second.get();
+			}
+		}
+
+		// Binding a view recursively resolves referenced relations through this
+		// schema. Keep the recursion guard thread-local so concurrent connections
+		// can bind the same uncached view without being mistaken for a cycle.
+		static thread_local unordered_set<string> view_bind_stack;
+		auto binding_key = to_string(reinterpret_cast<uintptr_t>(this)) + ":" + key;
+		if (!view_bind_stack.insert(binding_key).second) {
+			throw InvalidInputException("RC_CATALOG_VIEW_CYCLE: circular view dependency involving %s",
+			                            descriptor->view_name);
+		}
+		unique_ptr<ViewCatalogEntry> created;
+		try {
+			created = MakeInMemoryViewEntry(context, catalog, *this, *descriptor);
+		} catch (...) {
+			view_bind_stack.erase(binding_key);
+			throw;
+		}
+		view_bind_stack.erase(binding_key);
+
+		lock_guard<mutex> guard(entries_lock);
+		if (!current_revision || *current_revision != revision) {
+			throw InvalidInputException("RC_METADATA_REVISION_CHANGED: Catalog revision changed during view binding");
+		}
+		auto entry = views.find(key);
+		if (entry == views.end()) {
+			entry = views.emplace(key, std::move(created)).first;
+		}
+		return entry->second.get();
+	}
 	void AdvanceRevision(uint64_t revision) {
 		if (current_revision && *current_revision == revision) {
 			return;
@@ -770,6 +1049,8 @@ private:
 		entries.clear();
 		previous_enumeration_entries = std::move(enumeration_entries);
 		enumeration_entries.clear();
+		previous_views = std::move(views);
+		views.clear();
 		current_revision = revision;
 	}
 
@@ -780,6 +1061,8 @@ private:
 	unordered_map<string, unique_ptr<InMemoryTableEntry>> previous_entries;
 	unordered_map<string, unique_ptr<InMemoryTableEntry>> enumeration_entries;
 	unordered_map<string, unique_ptr<InMemoryTableEntry>> previous_enumeration_entries;
+	unordered_map<string, unique_ptr<ViewCatalogEntry>> views;
+	unordered_map<string, unique_ptr<ViewCatalogEntry>> previous_views;
 	std::optional<uint64_t> current_revision;
 };
 

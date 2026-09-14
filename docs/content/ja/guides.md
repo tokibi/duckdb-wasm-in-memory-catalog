@@ -61,7 +61,37 @@ await catalog.replaceTable('main', {
 
 Schema 名と table の `name` で対象を特定します。対象が存在しない場合はエラーになります。他のテーブルは再送・再検証せず、そのまま維持します。
 
-`publishSnapshot()` と `replaceTable()` は共通のキューで呼び出し順に処理します。対象は処理時点のカタログから探します。後から全体置換すると、それ以前のテーブル更新も含めて置き換わります。検証に失敗しても現在の状態は変わらず、次の更新を続けられます。
+`publishSnapshot()`、`replaceTable()`、`replaceView()` は共通のキューで呼び出し順に処理します。対象は処理時点の catalog から探します。後から全体置換すると、それ以前の relation 更新も含めて置き換わります。検証に失敗しても現在の状態は変わらず、次の更新を続けられます。
+
+## View を publish・更新する
+
+`format_version: 3` を使い、各 view を名前と単一の `SELECT` query で定義します。
+
+```js
+const snapshot = {
+  format_version: 3,
+  schemas: [{
+    name: 'main',
+    tables,
+    views: [{
+      name: 'active_events',
+      query: 'SELECT * FROM events WHERE active',
+    }],
+  }],
+}
+await catalog.publishSnapshot(snapshot)
+```
+
+Catalog 全体を再送せずに既存 view を更新するには、完全な定義を渡します。
+
+```js
+await catalog.replaceView('main', {
+  name: 'active_events',
+  query: 'SELECT * FROM events WHERE active AND category IS NOT NULL',
+})
+```
+
+名前は大文字・小文字を区別せずに照合されます。View の追加、削除、名前変更には `publishSnapshot()` を使います。構文エラー、参照先の欠落、互換性のない参照、循環参照は、query のために DuckDB が view を bind するときにエラーになります。
 
 ## Catalog を query する
 
