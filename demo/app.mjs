@@ -25,12 +25,8 @@ const steps = new Map(
 )
 
 const rootUrl = new URL('./', import.meta.url)
-const defaultSql = `SELECT
-  n_regionkey,
-  count(*) AS nations
-FROM demo.analytics.nation
-GROUP BY n_regionkey
-ORDER BY n_regionkey;`
+const defaultSql = `SELECT *
+FROM demo.analytics.nation_counts_by_region;`
 
 let activeRuntime = null
 let metadataPromise = null
@@ -47,7 +43,7 @@ function loadMetadata() {
 
 function defaultCatalog(metadata, fileUrl) {
   return {
-    format_version: 2,
+    format_version: 3,
     schemas: [
       {
         name: 'analytics',
@@ -61,6 +57,17 @@ function defaultCatalog(metadata, fileUrl) {
             },
             columns: metadata.columns,
             files: [{ uri: fileUrl }],
+          },
+        ],
+        views: [
+          {
+            name: 'nation_counts_by_region',
+            query: `SELECT
+  n_regionkey,
+  count(*) AS nations
+FROM nation
+GROUP BY n_regionkey
+ORDER BY n_regionkey`,
           },
         ],
       },

@@ -37,8 +37,9 @@
         <div class="eyebrow">Browser-only metadata catalog</div>
         <h1>Publish metadata.<br>Query remote files.</h1>
         <p class="hero-copy">
-          Application-owned schema and file metadata become an ordinary read-only DuckDB catalog.
-          Each table explicitly declares how its files should be scanned.
+          Application-owned schemas, tables, and views become an ordinary read-only DuckDB catalog.
+          Tables explicitly declare how their files should be scanned, while views keep reusable SQL
+          definitions close to the metadata.
         </p>
         <div class="hero-actions">
           <a class="button primary" href="#demo">Try the demo</a>
@@ -48,6 +49,7 @@
           <span>DuckDB-Wasm</span>
           <span>Read-only catalog</span>
           <span>Explicit scanners</span>
+          <span>SQL views</span>
           <span>Direct HTTPS</span>
         </div>
       </section>
@@ -55,21 +57,21 @@
       <section class="architecture" aria-labelledby="architecture-title">
         <div class="section-heading">
           <span>Architecture</span>
-          <h2 id="architecture-title">The catalog describes tables. DuckDB reads their files.</h2>
+          <h2 id="architecture-title">The catalog describes tables and views. DuckDB reads the data.</h2>
         </div>
         <div class="flow-grid two-up">
           <article class="flow-card">
             <span class="flow-index">01</span>
             <h3>In-Memory Catalog</h3>
-            <p>The host publishes schemas, tables, columns, scanner settings, and file URIs.</p>
-            <code>metadata → read-only catalog</code>
+            <p>The host publishes schemas, tables, columns, scanner settings, file URIs, and view SQL.</p>
+            <code>metadata → tables + views</code>
           </article>
           <div class="flow-arrow" aria-hidden="true">→</div>
           <article class="flow-card accent">
             <span class="flow-index">02</span>
             <h3>DuckDB-Wasm</h3>
-            <p>When SQL touches a table, DuckDB reads the declared files using that table's scanner configuration.</p>
-            <code>SQL → scanner → file access</code>
+            <p>SQL can read tables from their declared files or reuse a view definition registered by the catalog.</p>
+            <code>SQL → table scanner or view</code>
           </article>
         </div>
       </section>
@@ -151,7 +153,7 @@
               <div>
                 <span class="component-kicker">Catalog</span>
                 <h3 id="catalog-title">Published metadata</h3>
-                <p>Edit the table schema, scanner configuration, and file references that DuckDB sees.</p>
+                <p>Edit table schemas, scanner configuration, view definitions, and file references that DuckDB sees.</p>
               </div>
             </header>
 
@@ -171,7 +173,7 @@
           <header class="query-toolbar">
             <div class="query-heading">
               <span class="component-kicker">Query</span>
-              <h3 id="query-title">DuckDB query</h3>
+              <h3 id="query-title">DuckDB table or view query</h3>
               <div class="query-state" data-step="query" data-state="idle">
                 <span class="status-dot" aria-hidden="true"></span>
                 <span data-step-detail>Waiting for runtime</span>
@@ -195,9 +197,9 @@
                   <span>Inspect columns and types without scanning the hosted file.</span>
                   <code>DESCRIBE demo.analytics.nation;</code>
                 </button>
-                <button class="query-example" type="button" data-query-example="tables" data-query-label="List tables">
-                  <strong>List tables</strong>
-                  <span>Enumerate tables in the current Catalog schema.</span>
+                <button class="query-example" type="button" data-query-example="tables" data-query-label="List relations">
+                  <strong>List tables and views</strong>
+                  <span>Enumerate tables and views in the current Catalog schema.</span>
                   <code>SHOW ALL TABLES;</code>
                 </button>
                 <button class="query-example" type="button" data-query-example="rows" data-query-label="Preview rows">
@@ -209,6 +211,16 @@
                   <strong>Aggregate by region</strong>
                   <span>Run a simple grouping query over the fixture.</span>
                   <code>GROUP BY n_regionkey</code>
+                </button>
+                <button class="query-example" type="button" data-query-example="viewMetadata" data-query-label="View metadata">
+                  <strong>View metadata</strong>
+                  <span>Inspect the view definition registered in the catalog.</span>
+                  <code>SELECT … FROM duckdb_views()</code>
+                </button>
+                <button class="query-example" type="button" data-query-example="viewRows" data-query-label="Query the view">
+                  <strong>Query the view</strong>
+                  <span>Read the region summary through the catalog view.</span>
+                  <code>SELECT * FROM …nation_counts_by_region</code>
                 </button>
               </div>
             </section>
