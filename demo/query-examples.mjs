@@ -40,10 +40,16 @@ function currentTarget() {
 
   const schemaName = snapshot?.schemas?.[0]?.name
   const tableName = snapshot?.schemas?.[0]?.tables?.[0]?.name
+  const viewName = snapshot?.schemas?.[0]?.views?.[0]?.name
   if (typeof schemaName !== 'string' || !schemaName) return null
   if (typeof tableName !== 'string' || !tableName) return null
 
-  return { catalogName, schemaName, tableName }
+  return {
+    catalogName,
+    schemaName,
+    tableName,
+    viewName: typeof viewName === 'string' && viewName ? viewName : null,
+  }
 }
 
 function qualifiedTable(target) {
@@ -52,15 +58,41 @@ function qualifiedTable(target) {
     .join('.')
 }
 
+function qualifiedView(target) {
+  return [target.catalogName, target.schemaName, target.viewName]
+    .map(quoteIdentifier)
+    .join('.')
+}
+
+function quoteString(value) {
+  return `'${String(value).replaceAll("'", "''")}'`
+}
+
 function examplesFor(target) {
   if (!target) return null
   const table = qualifiedTable(target)
-  return {
+  const examples = {
     metadata: `DESCRIBE ${table};`,
     tables: `SHOW ALL TABLES;`,
     rows: `SELECT *\nFROM ${table}\nLIMIT 10;`,
     aggregate: `SELECT\n  n_regionkey,\n  count(*) AS nations\nFROM ${table}\nGROUP BY n_regionkey\nORDER BY n_regionkey;`,
   }
+
+  if (target.viewName) {
+    const view = qualifiedView(target)
+    examples.viewMetadata = `SELECT
+  database_name,
+  schema_name,
+  view_name,
+  sql
+FROM duckdb_views()
+WHERE database_name = ${quoteString(target.catalogName)}
+  AND schema_name = ${quoteString(target.schemaName)};`
+    examples.viewRows = `SELECT *
+FROM ${view};`
+  }
+
+  return examples
 }
 
 function compactSql(sql) {
