@@ -71,9 +71,17 @@ scanner: {
   type: 'parquet',
   options: {},
 }
+
+scanner: {
+  type: 'csv',
+  options: {
+    delimiter: ',',
+    header: true,
+  },
+}
 ```
 
-Parquet scanner は published column の数、順序、名前、型と physical schema を検証します。
+Parquet scanner は published column の数、順序、名前、型と physical schema を検証します。CSV scanner は published column を read schema として使い、CSV header、column 数、値をその schema に対して検証します。CSV の `header` の既定値は DuckDB の自動 header 判定です。ファイル形式が決まっている場合は明示的に指定してください。
 
 ## Scan URI と cache identity
 

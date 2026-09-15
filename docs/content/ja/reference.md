@@ -74,11 +74,11 @@ Catalog publication では catalog 全体の complete snapshot を送ります�
 }
 ```
 
-Physical Parquet schema は published column の数、順序、名前、および互換性のある DuckDB type と一致する必要があります。
+Physical file schema は published column の数、順序、名前、および互換性のある DuckDB type と一致する必要があります。Parquet では metadata を直接検証し、CSV では published column を read schema として使い、bind と scan の際に header と値を検証します。
 
 ### Scanner
 
-現在受け付ける形式は次のみです。
+Scanner type と options は明示します。
 
 ```js
 {
@@ -87,7 +87,19 @@ Physical Parquet schema は published column の数、順序、名前、およ�
 }
 ```
 
-空でない Parquet options と、Parquet 以外の scanner type は現在拒否されます。
+CSV も利用できます。
+
+```js
+{
+  type: 'csv',
+  options: {
+    delimiter: ',',
+    header: true,
+  },
+}
+```
+
+CSV options は省略できます。対応する option は `auto_detect`、`header`、`delimiter`、`quote`、`escape`、`comment`、`skip`、`nullstr`、`all_varchar`、`normalize_names`、`dateformat`、`timestampformat`、`compression`、`ignore_errors`、`null_padding` です。Boolean option は boolean、`skip` は 0 以上の safe integer、文字列 option は NUL を含まない空でない文字列である必要があります。未対応 option は拒否されます。Parquet の options は空である必要があります。
 
 ### File
 
@@ -216,8 +228,8 @@ View を parse または bind できない場合、DuckDB query は `RC_CATALOG_
 - Extension build では、`versions.lock` に指定された DuckDB commit と Emscripten version を使用します。これはホストアプリケーションが選択する DuckDB-Wasm version とは別の build input です。
 - Read-only catalog。DuckDB 側からの catalog mutation は拒否される。
 - `format_version: 2` は table、`format_version: 3` は view もサポートする。
-- Scanner は Parquet のみ。
-- Parquet scanner options は現在空 object のみ。
+- Scanner は Parquet と CSV に対応します。
+- Parquet scanner options は空 object、CSV options はドキュメント記載の allowlist に限定されます。
 - Host が完全な column metadata を与える必要があり、catalog 自体は schema inference を行わない。
 - Table `snapshot` はアプリケーションが管理し、表す bytes または physical schema が変わったときに更新する必要がある。
 - HTTP fragment による cache isolation は DuckDB 内部の cache key を分けるもの。Mutable remote resource を server 側で version-aware にするものではない。複数 version の query を同時実行するなら immutable/versioned URL が必要。

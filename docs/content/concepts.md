@@ -71,9 +71,17 @@ scanner: {
   type: 'parquet',
   options: {},
 }
+
+scanner: {
+  type: 'csv',
+  options: {
+    delimiter: ',',
+    header: true,
+  },
+}
 ```
 
-The Parquet scanner validates the physical schema against the published column count, order, names, and types.
+The Parquet scanner validates the physical schema against the published column count, order, names, and types. The CSV scanner uses the published columns as its read schema and validates the CSV header, column count, and values against that schema. CSV `header` defaults to DuckDB's automatic header detection; set it explicitly when the file format is known.
 
 ## Scan URI and cache identity
 

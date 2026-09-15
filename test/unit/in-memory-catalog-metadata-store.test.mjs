@@ -298,7 +298,7 @@ describe('InMemoryCatalogMetadataStore', () => {
       'https://example.test/new')
   })
 
-  it('requires an explicit supported scanner in format version 2', async () => {
+  it('requires an explicit supported scanner and validates csv options', async () => {
     const store = new InMemoryCatalogMetadataStore()
     const session = store.openWorkspaceSession('workspace')
 
@@ -309,21 +309,33 @@ describe('InMemoryCatalogMetadataStore', () => {
       'RC_METADATA_INVALID',
     )
 
+    const supportedCsv = snapshot()
+    supportedCsv.schemas[0].tables[0].scanner = {
+      type: 'csv',
+      options: { delimiter: '\t', header: true, skip: 1, all_varchar: true },
+    }
+    await session.replaceCatalogSnapshot(supportedCsv)
+    assert.deepEqual(
+      store.lookupTable('workspace', '1', 'main', 'table1').scanner,
+      supportedCsv.schemas[0].tables[0].scanner,
+    )
+
     const unsupported = snapshot()
-    unsupported.schemas[0].tables[0].scanner.type = 'csv'
+    unsupported.schemas[0].tables[0].scanner.type = 'json'
     await expectCode(
       () => session.replaceCatalogSnapshot(unsupported),
       'RC_SCANNER_UNSUPPORTED',
     )
 
     const options = snapshot()
+    options.schemas[0].tables[0].scanner.type = 'csv'
     options.schemas[0].tables[0].scanner.options = { hive_partitioning: true }
     await expectCode(
       () => session.replaceCatalogSnapshot(options),
       'RC_METADATA_INVALID',
     )
 
-    assert.equal(store.currentRevision('workspace'), undefined)
+    assert.equal(store.currentRevision('workspace'), 1n)
   })
 
   it('rejects the previous snapshot format instead of choosing a scanner implicitly', async () => {

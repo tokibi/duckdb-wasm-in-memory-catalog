@@ -22,6 +22,7 @@
           schema_name: schemaName,
           table_name: tableName,
           snapshot: table.snapshot,
+          scanner: table.scanner,
           columns: table.columns,
           files: table.files,
         })

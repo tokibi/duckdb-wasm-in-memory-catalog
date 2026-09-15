@@ -91,7 +91,7 @@ const snapshot = {
 }
 ```
 
-Catalog は filename や URI から scanner を推論しません。各 table が scanner を明示します。
+Catalog は filename や URI から scanner を推論しません。各 table が scanner を明示します。CSV file には `type: 'csv'` を指定し、delimiter や header などが既定値と異なる場合は対応する CSV option を指定します。
 
 ## 4. Catalog を初期化する
 

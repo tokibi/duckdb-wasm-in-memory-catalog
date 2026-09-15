@@ -71,6 +71,16 @@ const metadata = {
 }
 await writeFile(resolve(outputRoot, 'data/demo.json'), `${JSON.stringify(metadata, null, 2)}\n`)
 
+const csvFixture = [
+  'event_id,category,value',
+  '1,alpha,10',
+  '2,beta,20',
+  '3,alpha,15',
+  '4,gamma,5',
+  '',
+].join('\n')
+await writeFile(resolve(outputRoot, 'data/demo.csv'), csvFixture)
+
 process.stdout.write(
   `Built GitHub Pages demo: ${metadata.rows} rows, ${fixtureBytes.byteLength.toLocaleString()} bytes\n`,
 )

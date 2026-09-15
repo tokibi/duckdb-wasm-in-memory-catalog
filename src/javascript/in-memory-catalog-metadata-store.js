@@ -9,7 +9,24 @@
     'VARCHAR',
     'DATE', 'TIMESTAMP', 'TIMESTAMP_TZ',
   ])
-  const SUPPORTED_SCANNERS = new Set(['parquet'])
+  const SUPPORTED_SCANNERS = new Set(['parquet', 'csv'])
+  const CSV_SCANNER_OPTION_TYPES = Object.freeze({
+    auto_detect: 'boolean',
+    header: 'boolean',
+    delimiter: 'string',
+    quote: 'string',
+    escape: 'string',
+    comment: 'string',
+    skip: 'nonnegative_integer',
+    nullstr: 'string',
+    all_varchar: 'boolean',
+    normalize_names: 'boolean',
+    dateformat: 'string',
+    timestampformat: 'string',
+    compression: 'string',
+    ignore_errors: 'boolean',
+    null_padding: 'boolean',
+  })
   const DECIMAL_REVISION_PATTERN = /^(0|[1-9][0-9]*)$/
   const MAX_UINT64 = (1n << 64n) - 1n
 
@@ -462,10 +479,33 @@
     if (!isRecord(input.options)) {
       invalid(`${path}.options must be an object`)
     }
-    if (type === 'parquet' && Object.keys(input.options).length !== 0) {
-      invalid(`${path}.options must be empty for parquet`)
+    if (type === 'parquet') {
+      if (Object.keys(input.options).length !== 0) {
+        invalid(`${path}.options must be empty for parquet`)
+      }
+      return deepFreeze({ type, options: {} })
     }
-    return deepFreeze({ type, options: {} })
+
+    const options = {}
+    for (const [key, value] of Object.entries(input.options)) {
+      const expectedType = CSV_SCANNER_OPTION_TYPES[key]
+      if (!expectedType) {
+        invalid(`${path}.options.${key} is not supported for csv`)
+      }
+      if (expectedType === 'boolean' && typeof value !== 'boolean') {
+        invalid(`${path}.options.${key} must be boolean`)
+      }
+      if (expectedType === 'string' &&
+          (typeof value !== 'string' || value.length === 0 || value.includes('\0'))) {
+        invalid(`${path}.options.${key} must be a non-empty string without NUL`)
+      }
+      if (expectedType === 'nonnegative_integer' &&
+          (!Number.isSafeInteger(value) || value < 0)) {
+        invalid(`${path}.options.${key} must be a non-negative safe integer`)
+      }
+      options[key] = value
+    }
+    return deepFreeze({ type, options })
   }
 
   function parseBridgeRevision(value) {
