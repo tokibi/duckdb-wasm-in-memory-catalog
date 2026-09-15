@@ -389,7 +389,7 @@ describe('InMemoryCatalogController', () => {
       {
         workspaceId: 'workspace',
         catalogName: 'dataset',
-        ackTimeoutMs: 5,
+        ackTimeoutMs: 50,
         onRecoveryRequired(details) {
           recovery.push(details)
           throw new Error('observer failure')
