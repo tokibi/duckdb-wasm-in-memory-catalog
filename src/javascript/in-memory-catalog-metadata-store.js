@@ -9,7 +9,33 @@
     'VARCHAR',
     'DATE', 'TIMESTAMP', 'TIMESTAMP_TZ',
   ])
-  const SUPPORTED_SCANNERS = new Set(['parquet'])
+  const SUPPORTED_SCANNERS = new Set(['parquet', 'csv'])
+  const CSV_SCANNER_OPTION_TYPES = Object.freeze({
+    auto_detect: 'boolean',
+    header: 'boolean',
+    delimiter: 'string',
+    quote: 'string_allow_empty',
+    escape: 'string_allow_empty',
+    comment: 'string_allow_empty',
+    skip: 'nonnegative_integer',
+    nullstr: 'string_or_string_array',
+    dateformat: 'string',
+    timestampformat: 'string',
+    compression: 'string',
+    ignore_errors: 'boolean',
+    null_padding: 'boolean',
+    allow_quoted_nulls: 'boolean',
+    buffer_size: 'positive_integer',
+    decimal_separator: 'string',
+    encoding: 'string',
+    force_not_null: 'string_array',
+    max_line_size: 'nonnegative_integer',
+    new_line: 'string',
+    parallel: 'boolean',
+    sample_size: 'integer',
+    strict_mode: 'boolean',
+    thousands: 'string_allow_empty',
+  })
   const DECIMAL_REVISION_PATTERN = /^(0|[1-9][0-9]*)$/
   const MAX_UINT64 = (1n << 64n) - 1n
 
@@ -462,10 +488,57 @@
     if (!isRecord(input.options)) {
       invalid(`${path}.options must be an object`)
     }
-    if (type === 'parquet' && Object.keys(input.options).length !== 0) {
-      invalid(`${path}.options must be empty for parquet`)
+    if (type === 'parquet') {
+      if (Object.keys(input.options).length !== 0) {
+        invalid(`${path}.options must be empty for parquet`)
+      }
+      return deepFreeze({ type, options: {} })
     }
-    return deepFreeze({ type, options: {} })
+
+    const options = {}
+    for (const [key, value] of Object.entries(input.options)) {
+      const expectedType = CSV_SCANNER_OPTION_TYPES[key]
+      if (!expectedType) {
+        invalid(`${path}.options.${key} is not supported for csv`)
+      }
+      if (expectedType === 'boolean' && typeof value !== 'boolean') {
+        invalid(`${path}.options.${key} must be boolean`)
+      }
+      if (expectedType === 'string' &&
+          (typeof value !== 'string' || value.length === 0 || value.includes('\0'))) {
+        invalid(`${path}.options.${key} must be a non-empty string without NUL`)
+      }
+      if (expectedType === 'string_allow_empty' &&
+          (typeof value !== 'string' || value.includes('\0'))) {
+        invalid(`${path}.options.${key} must be a string without NUL`)
+      }
+      if (expectedType === 'string_array' &&
+          (!Array.isArray(value) || value.length === 0 || value.some((item) =>
+            typeof item !== 'string' || item.length === 0 || item.includes('\0')))) {
+        invalid(`${path}.options.${key} must be a non-empty array of non-empty strings without NUL`)
+      }
+      if (expectedType === 'string_or_string_array' &&
+          ((typeof value !== 'string' && !Array.isArray(value)) ||
+            (typeof value === 'string' && value.includes('\0')) ||
+            (Array.isArray(value) && value.some((item) =>
+              typeof item !== 'string' || item.includes('\0'))))) {
+        invalid(`${path}.options.${key} must be a string or an array of strings without NUL`)
+      }
+      if (expectedType === 'nonnegative_integer' &&
+          (!Number.isSafeInteger(value) || value < 0)) {
+        invalid(`${path}.options.${key} must be a non-negative safe integer`)
+      }
+      if (expectedType === 'positive_integer' &&
+          (!Number.isSafeInteger(value) || value <= 0)) {
+        invalid(`${path}.options.${key} must be a positive safe integer`)
+      }
+      if (expectedType === 'integer' &&
+          (!Number.isSafeInteger(value) || value < 1 && value !== -1)) {
+        invalid(`${path}.options.${key} must be -1 or a positive safe integer`)
+      }
+      options[key] = value
+    }
+    return deepFreeze({ type, options })
   }
 
   function parseBridgeRevision(value) {

@@ -43,7 +43,7 @@ await catalog.publishSnapshot(nextSnapshot)
 
 Controller は呼び出し時の内容を複製し、呼び出し順に publish します。検証に成功した snapshot が現在の catalog 全体を一括置換します。非同期処理で古い結果が遅れて届く場合は、publish 前に除外してください。
 
-各 table の `snapshot` は、その table の bytes または physical Parquet schema が変わったときだけ変更します。
+各 table の `snapshot` は、その table の bytes または physical file schema が変わったときだけ変更します。
 
 ## 単一テーブルを更新する
 
@@ -117,7 +117,7 @@ Catalog の mutation statement は拒否されます。メタデータの author
 
 ## Remote file を使う
 
-`files[].uri` は location を表すだけで、format は表しません。HTTP(S) file を使う場合は、その remote resource にアクセスできるよう DuckDB-Wasm filesystem を設定します。現在サポートされている scanner は Parquet のみです。
+`files[].uri` は location を表すだけで、format は表しません。HTTP(S) file を使う場合は、その remote resource にアクセスできるよう DuckDB-Wasm filesystem を設定します。対応する scanner は Parquet と CSV で、`table.scanner` で明示的に選択します。Scanner option は [Scanner](./scanners.md) を参照してください。
 
 Extension は metadata 上の URI を変更せず保持し、DuckDB の scan 用には table snapshot を含む内部 URI を生成します。URL fragment は HTTP request には送られないため、gateway や Service Worker には元の base URI が届きます。
 

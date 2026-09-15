@@ -24,7 +24,8 @@ description: アプリケーションが管理するテーブルメタデータ�
 1. [Getting started](./getting-started.md) でランタイムをセットアップします。
 2. [Guides](./guides.md) で catalog の publish / update 方法を確認します。
 3. アプリケーションへ組み込む前に [Concepts](./concepts.md) で complete snapshot、table snapshot の関係を理解します。
-4. メタデータ生成時は [Reference](./reference.md) の snapshot format、JavaScript API、migration note を参照します。
+4. [Scanner](./scanners.md) で利用できる Parquet / CSV scanner と option を確認します。
+5. メタデータ生成時は [Reference](./reference.md) の snapshot format、JavaScript API、migration note を参照します。
 
 [ライブデモ](../../) では、編集可能な snapshot と SQL を使って同じ catalog 実装をブラウザ上で試せます。
 

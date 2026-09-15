@@ -44,6 +44,7 @@ export default defineConfig({
                 { text: 'Getting started', link: '/getting-started.md' },
                 { text: 'Guides', link: '/guides.md' },
                 { text: 'Concepts', link: '/concepts.md' },
+                { text: { en: 'Scanners', ja: 'Scanner' }, link: '/scanners.md' },
                 { text: 'Reference', link: '/reference.md' },
               ],
             },

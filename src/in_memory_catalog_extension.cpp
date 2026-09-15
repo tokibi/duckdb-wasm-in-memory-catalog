@@ -12,6 +12,7 @@
 #include "duckdb/common/multi_file/multi_file_list.hpp"
 #include "duckdb/common/multi_file/multi_file_states.hpp"
 #include "duckdb/common/string_util.hpp"
+#include "duckdb/execution/operator/csv_scanner/csv_multi_file_info.hpp"
 #include "duckdb/function/scalar_function.hpp"
 #include "duckdb/main/attached_database.hpp"
 #include "duckdb/main/config.hpp"
@@ -53,12 +54,18 @@ struct CatalogFileMetadata {
 	string uri;
 };
 
+struct CatalogScannerDescriptor {
+	string type;
+	named_parameter_map_t options;
+};
+
 struct CatalogTableDescriptor {
 	string workspace;
 	uint64_t catalog_revision;
 	string schema_name;
 	string table_name;
 	string snapshot_id;
+	CatalogScannerDescriptor scanner;
 	vector<CatalogColumnMetadata> columns;
 	vector<CatalogFileMetadata> files;
 };
@@ -203,6 +210,143 @@ static string JSONString(yyjson_val *object, const char *key) {
 	return string(unsafe_yyjson_get_str(value), unsafe_yyjson_get_len(value));
 }
 
+static bool IsSupportedCSVScannerOption(const string &key) {
+	static const unordered_set<string> supported_options {
+	    "auto_detect",       "header",           "delimiter",       "quote",          "escape",
+	    "comment",           "skip",             "nullstr",         "dateformat",     "timestampformat",
+	    "compression",       "ignore_errors",    "null_padding",    "allow_quoted_nulls",
+	    "buffer_size",       "decimal_separator", "encoding",       "force_not_null", "max_line_size",
+	    "new_line",          "parallel",         "sample_size",     "strict_mode",    "thousands",
+	};
+	return supported_options.find(key) != supported_options.end();
+}
+
+static string CSVScannerOptionName(const string &key) {
+	if (key == "delimiter") {
+		return "delim";
+	}
+	return key;
+}
+
+static bool IsCSVScannerBooleanOption(const string &key) {
+	return key == "auto_detect" || key == "header" || key == "ignore_errors" || key == "null_padding" ||
+	       key == "allow_quoted_nulls" || key == "parallel" || key == "strict_mode";
+}
+
+static bool IsCSVScannerIntegerOption(const string &key) {
+	return key == "skip" || key == "buffer_size" || key == "max_line_size" || key == "sample_size";
+}
+
+static bool IsCSVScannerStringArrayOption(const string &key) {
+	return key == "force_not_null" || key == "nullstr";
+}
+
+static bool IsCSVScannerEmptyStringOption(const string &key) {
+	return key == "quote" || key == "escape" || key == "comment" || key == "thousands";
+}
+
+static Value DecodeScannerOption(const string &key, yyjson_val *value) {
+	if (!IsSupportedCSVScannerOption(key)) {
+		DescriptorInvalid();
+	}
+	const auto is_boolean_option = IsCSVScannerBooleanOption(key);
+	const auto is_integer_option = IsCSVScannerIntegerOption(key);
+	const auto is_array_option = IsCSVScannerStringArrayOption(key);
+	if (is_boolean_option && !yyjson_is_bool(value)) {
+		DescriptorInvalid();
+	}
+	if (is_integer_option && !yyjson_is_sint(value) && !yyjson_is_uint(value)) {
+		DescriptorInvalid();
+	}
+	if (is_array_option && !yyjson_is_arr(value) && !(key == "nullstr" && yyjson_is_str(value))) {
+		DescriptorInvalid();
+	}
+	if (!is_boolean_option && !is_integer_option && !is_array_option && !yyjson_is_str(value)) {
+		DescriptorInvalid();
+	}
+	if (yyjson_is_bool(value)) {
+		return Value::BOOLEAN(yyjson_get_bool(value));
+	}
+	if (yyjson_is_str(value)) {
+		string result(unsafe_yyjson_get_str(value), unsafe_yyjson_get_len(value));
+		if (result.empty() && key != "nullstr" && !IsCSVScannerEmptyStringOption(key)) {
+			DescriptorInvalid();
+		}
+		return Value(std::move(result));
+	}
+	if (yyjson_is_sint(value)) {
+		const auto number = yyjson_get_sint(value);
+		if ((key != "sample_size" && number < 0) || (key == "sample_size" && (number < 1 && number != -1)) ||
+		    (key == "buffer_size" && number == 0)) {
+			DescriptorInvalid();
+		}
+		if (key == "buffer_size") {
+			return Value::UBIGINT(static_cast<uint64_t>(number));
+		}
+		return Value::BIGINT(number);
+	}
+	if (yyjson_is_uint(value)) {
+		const auto number = yyjson_get_uint(value);
+		if (number > NumericLimits<int64_t>::Maximum()) {
+			DescriptorInvalid();
+		}
+		if (key == "buffer_size" && number == 0) {
+			DescriptorInvalid();
+		}
+		if (key == "buffer_size") {
+			return Value::UBIGINT(number);
+		}
+		return Value::BIGINT(static_cast<int64_t>(number));
+	}
+	if (yyjson_is_arr(value)) {
+		vector<Value> values;
+		if (key == "force_not_null" && yyjson_arr_size(value) == 0) {
+			DescriptorInvalid();
+		}
+		size_t index, count;
+		yyjson_val *item;
+		yyjson_arr_foreach(value, index, count, item) {
+			if (!yyjson_is_str(item)) {
+				DescriptorInvalid();
+			}
+			string item_value(unsafe_yyjson_get_str(item), unsafe_yyjson_get_len(item));
+			if ((key == "force_not_null" && item_value.empty()) || item_value.find('\0') != string::npos) {
+				DescriptorInvalid();
+			}
+			values.emplace_back(std::move(item_value));
+		}
+		return Value::LIST(LogicalType::VARCHAR, std::move(values));
+	}
+	DescriptorInvalid();
+}
+
+static void DecodeScanner(yyjson_val *object, CatalogTableDescriptor &descriptor) {
+	auto scanner = yyjson_obj_get(object, "scanner");
+	if (!scanner || !yyjson_is_obj(scanner) || yyjson_obj_size(scanner) != 2) {
+		DescriptorInvalid();
+	}
+	descriptor.scanner.type = JSONString(scanner, "type");
+	if (descriptor.scanner.type != "parquet" && descriptor.scanner.type != "csv") {
+		DescriptorInvalid();
+	}
+	auto options = yyjson_obj_get(scanner, "options");
+	if (!options || !yyjson_is_obj(options)) {
+		DescriptorInvalid();
+	}
+	if (descriptor.scanner.type == "parquet" && yyjson_obj_size(options) != 0) {
+		DescriptorInvalid();
+	}
+	if (descriptor.scanner.type == "csv") {
+		size_t index, count;
+		yyjson_val *key, *option_value;
+		yyjson_obj_foreach(options, index, count, key, option_value) {
+			auto option_name = string(unsafe_yyjson_get_str(key), unsafe_yyjson_get_len(key));
+			descriptor.scanner.options.emplace(CSVScannerOptionName(option_name),
+			                                  DecodeScannerOption(option_name, option_value));
+		}
+	}
+}
+
 static uint64_t ParseCatalogRevision(const string &value) {
 	if (value.empty()) {
 		DescriptorInvalid();
@@ -272,7 +416,7 @@ static shared_ptr<const CatalogTableDescriptor> DecodeProductionDescriptor(const
 		DescriptorInvalid();
 	}
 
-	if (yyjson_obj_size(root) != 6) {
+	if (yyjson_obj_size(root) != 7) {
 		DescriptorInvalid();
 	}
 	auto descriptor = make_shared_ptr<CatalogTableDescriptor>();
@@ -287,6 +431,7 @@ static shared_ptr<const CatalogTableDescriptor> DecodeProductionDescriptor(const
 		DescriptorInvalid();
 	}
 
+	DecodeScanner(root, *descriptor);
 	DecodeColumns(root, *descriptor);
 
 	auto files = yyjson_obj_get(root, "files");
@@ -763,8 +908,10 @@ public:
 	}
 
 	TableFunction GetScanFunction(ClientContext &context, unique_ptr<FunctionData> &bind_data) override {
+		const auto &scanner = descriptor->scanner;
+		const auto scanner_name = scanner.type == "csv" ? "read_csv" : "parquet_scan";
 		auto &entry = Catalog::GetSystemCatalog(context).GetEntry<TableFunctionCatalogEntry>(context, DEFAULT_SCHEMA,
-		                                                                                     "parquet_scan");
+		                                                                                     scanner_name);
 		auto function = entry.functions.GetFunctionByArguments(context, {LogicalType::LIST(LogicalType::VARCHAR)});
 
 		vector<Value> files;
@@ -772,23 +919,38 @@ public:
 		for (const auto &file : descriptor->files) {
 			files.push_back(Value(in_memory_catalog::MakeDuckDBScanURI(file.uri, descriptor->snapshot_id)));
 		}
-		// Metadata is supplied to parquet_scan so DESCRIBE/EXPLAIN stay remote-free.
-		// The host URI remains opaque metadata; only the scanner receives the
-		// snapshot-versioned URI.
 		named_parameter_map_t named_parameters;
-		auto schema_struct_type = LogicalType::STRUCT(
-		    {{"name", LogicalType::VARCHAR}, {"type", LogicalType::VARCHAR}, {"default_value", LogicalType::VARCHAR}});
-		vector<Value> schema_keys;
-		vector<Value> schema_values;
-		schema_keys.reserve(descriptor->columns.size());
-		schema_values.reserve(descriptor->columns.size());
-		for (const auto &column : descriptor->columns) {
-			schema_keys.push_back(Value(column.name));
-			schema_values.push_back(Value::STRUCT(
-			    schema_struct_type, {Value(column.name), Value(column.type.ToString()), Value(LogicalType::VARCHAR)}));
+		if (scanner.type == "parquet") {
+			// Metadata is supplied to parquet_scan so DESCRIBE/EXPLAIN stay remote-free.
+			// The host URI remains opaque metadata; only the scanner receives the
+			// snapshot-versioned URI.
+			auto schema_struct_type = LogicalType::STRUCT(
+			    {{"name", LogicalType::VARCHAR}, {"type", LogicalType::VARCHAR}, {"default_value", LogicalType::VARCHAR}});
+			vector<Value> schema_keys;
+			vector<Value> schema_values;
+			schema_keys.reserve(descriptor->columns.size());
+			schema_values.reserve(descriptor->columns.size());
+			for (const auto &column : descriptor->columns) {
+				schema_keys.push_back(Value(column.name));
+				schema_values.push_back(Value::STRUCT(
+				    schema_struct_type, {Value(column.name), Value(column.type.ToString()), Value(LogicalType::VARCHAR)}));
+			}
+			named_parameters["schema"] =
+			    Value::MAP(LogicalType::VARCHAR, schema_struct_type, std::move(schema_keys), std::move(schema_values));
+		} else {
+			// read_csv uses the Catalog schema as its explicit columns definition.
+			// With auto-detection enabled (the default), DuckDB still validates the
+			// header and dialect while using these names and types as the contract.
+			child_list_t<Value> column_definitions;
+			column_definitions.reserve(descriptor->columns.size());
+			for (const auto &column : descriptor->columns) {
+				column_definitions.emplace_back(column.name, Value(column.type.ToString()));
+			}
+			named_parameters["columns"] = Value::STRUCT(std::move(column_definitions));
+			for (const auto &option : scanner.options) {
+				named_parameters[option.first] = option.second;
+			}
 		}
-		named_parameters["schema"] =
-		    Value::MAP(LogicalType::VARCHAR, schema_struct_type, std::move(schema_keys), std::move(schema_values));
 
 		vector<OpenFileInfo> open_files;
 		open_files.reserve(files.size());
@@ -796,7 +958,12 @@ public:
 			open_files.emplace_back(file.GetValue<string>());
 		}
 		auto file_list = make_shared_ptr<SimpleMultiFileList>(std::move(open_files));
-		auto interface = make_uniq<ParquetMultiFileInfo>();
+		unique_ptr<MultiFileReaderInterface> interface;
+		if (scanner.type == "parquet") {
+			interface = make_uniq<ParquetMultiFileInfo>();
+		} else {
+			interface = make_uniq<CSVMultiFileInfo>();
+		}
 		auto multi_file_reader = MultiFileReader::Create(function);
 		interface->InitializeInterface(context, *multi_file_reader, *file_list);
 		MultiFileOptions file_options;
@@ -806,16 +973,32 @@ public:
 				continue;
 			}
 			if (!interface->ParseOption(context, parameter.first, parameter.second, file_options, *options)) {
-				throw NotImplementedException("Unimplemented Parquet option %s", parameter.first);
+				throw NotImplementedException("Unimplemented %s option %s", scanner.type, parameter.first);
 			}
 		}
 		vector<LogicalType> return_types;
 		vector<string> return_names;
-		bind_data = MultiFileFunction<ParquetMultiFileInfo>::MultiFileBindInternal(
-		    context, std::move(multi_file_reader), std::move(file_list), return_types, return_names,
-		    std::move(file_options), std::move(options), std::move(interface));
-		parquet_scan_execution.store(function.function);
-		function.function = CatalogParquetScan;
+		if (scanner.type == "parquet") {
+			bind_data = MultiFileFunction<ParquetMultiFileInfo>::MultiFileBindInternal(
+			    context, std::move(multi_file_reader), std::move(file_list), return_types, return_names,
+			    std::move(file_options), std::move(options), std::move(interface));
+			parquet_scan_execution.store(function.function);
+			function.function = CatalogParquetScan;
+		} else {
+			bind_data = MultiFileFunction<CSVMultiFileInfo>::MultiFileBindInternal(
+			    context, std::move(multi_file_reader), std::move(file_list), return_types, return_names,
+			    std::move(file_options), std::move(options), std::move(interface));
+			if (return_names.size() != descriptor->columns.size()) {
+				throw InvalidInputException("RC_CSV_SCHEMA_MISMATCH: physical column count does not match Catalog metadata");
+			}
+			for (idx_t index = 0; index < descriptor->columns.size(); index++) {
+				const auto &column = descriptor->columns[index];
+				if (return_names[index] != column.name || return_types[index] != column.type) {
+					throw InvalidInputException(
+					    "RC_CSV_SCHEMA_MISMATCH: physical column order, name, or type does not match Catalog metadata");
+				}
+			}
+		}
 		return function;
 	}
 

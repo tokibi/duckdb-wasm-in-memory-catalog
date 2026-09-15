@@ -89,11 +89,40 @@ describe('In-Memory Catalog Worker runtime', () => {
       JSON.parse(runtime.bridge.lookupTable('workspace', '1', 'main', 'table1')).files,
       [{ uri: 'https://example.test/table' }],
     )
+    assert.deepEqual(
+      JSON.parse(runtime.bridge.lookupTable('workspace', '1', 'main', 'table1')).scanner,
+      { type: 'parquet', options: {} },
+    )
     await port.dispatch({
       type: 'IN_MEMORY_CATALOG_GET_DIAGNOSTICS',
       request_id: 'diagnostics-1',
     })
-    assert.equal(port.messages.at(-1).diagnostics.full_lookup_count, 1)
+    assert.equal(port.messages.at(-1).diagnostics.full_lookup_count, 2)
+  })
+
+  it('transfers csv scanner options through the Worker bridge', async () => {
+    const store = new InMemoryCatalogMetadataStore()
+    const runtime = createInMemoryCatalogWorkerRuntime(store)
+    const port = new FakePort()
+    await runtime.handleMessage({
+      data: { type: 'IN_MEMORY_CATALOG_OPEN_WORKSPACE_SESSION', workspace_id: 'workspace' },
+      ports: [port],
+    })
+    const candidate = snapshot()
+    candidate.schemas[0].tables[0].scanner = {
+      type: 'csv',
+      options: { delimiter: '\t', header: true, skip: 1 },
+    }
+    await port.dispatch({
+      type: 'IN_MEMORY_CATALOG_REPLACE_SNAPSHOT',
+      request_id: 'replace-csv-1',
+      snapshot: candidate,
+    })
+
+    assert.deepEqual(
+      JSON.parse(runtime.bridge.lookupTable('workspace', '1', 'main', 'table1')).scanner,
+      candidate.schemas[0].tables[0].scanner,
+    )
   })
 
   it('acknowledges a dedicated table replacement without exposing a revision', async () => {

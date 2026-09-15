@@ -40,6 +40,9 @@ function currentTarget() {
 
   const schemaName = snapshot?.schemas?.[0]?.name
   const tableName = snapshot?.schemas?.[0]?.tables?.[0]?.name
+  const csvTableName = snapshot?.schemas?.[0]?.tables?.find(
+    (table) => table?.scanner?.type === 'csv',
+  )?.name
   const viewName = snapshot?.schemas?.[0]?.views?.[0]?.name
   if (typeof schemaName !== 'string' || !schemaName) return null
   if (typeof tableName !== 'string' || !tableName) return null
@@ -48,6 +51,7 @@ function currentTarget() {
     catalogName,
     schemaName,
     tableName,
+    csvTableName: typeof csvTableName === 'string' && csvTableName ? csvTableName : null,
     viewName: typeof viewName === 'string' && viewName ? viewName : null,
   }
 }
@@ -76,6 +80,15 @@ function examplesFor(target) {
     tables: `SHOW ALL TABLES;`,
     rows: `SELECT *\nFROM ${table}\nLIMIT 10;`,
     aggregate: `SELECT\n  n_regionkey,\n  count(*) AS nations\nFROM ${table}\nGROUP BY n_regionkey\nORDER BY n_regionkey;`,
+  }
+
+  if (target.csvTableName) {
+    const csvTable = [target.catalogName, target.schemaName, target.csvTableName]
+      .map(quoteIdentifier)
+      .join('.')
+    examples.csvRows = `SELECT *
+FROM ${csvTable}
+ORDER BY event_id;`
   }
 
   if (target.viewName) {

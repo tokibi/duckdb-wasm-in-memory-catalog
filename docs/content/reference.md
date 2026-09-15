@@ -74,11 +74,11 @@ Each column has:
 }
 ```
 
-The physical Parquet schema must match the published column count, order, names, and compatible DuckDB types.
+The physical file schema must match the published column count, order, names, and compatible DuckDB types. Parquet metadata is checked directly; CSV uses the published columns as its read schema and validates the header and values while binding and scanning.
 
 ### Scanner
 
-The current implementation accepts only:
+The scanner type and options are explicit:
 
 ```js
 {
@@ -87,7 +87,19 @@ The current implementation accepts only:
 }
 ```
 
-Non-empty Parquet options and other scanner types are currently rejected.
+CSV is also supported:
+
+```js
+{
+  type: 'csv',
+  options: {
+    delimiter: ',',
+    header: true,
+  },
+}
+```
+
+See [Scanners](./scanners.md) for CSV defaults, validation boundaries, and the complete list of accepted options. Parquet options must be empty.
 
 ### Files
 
@@ -216,8 +228,8 @@ Remove `initialRevision` from `initialize(db, worker, options, initialRevision, 
 - The extension build uses the DuckDB commit and Emscripten versions specified in `versions.lock`; these build inputs are separate from the DuckDB-Wasm version selected by the host application.
 - Read-only catalog; DuckDB-side catalog mutation is rejected.
 - `format_version: 2` supports tables; `format_version: 3` adds views.
-- Parquet is the only supported scanner.
-- Parquet scanner options must currently be empty.
+- Parquet and CSV are supported scanners.
+- Parquet scanner options must be empty. CSV options are limited to the documented allowlist.
 - The host must provide complete column metadata; schema inference is not performed by the catalog.
 - Table `snapshot` values are application-managed and must change when represented bytes or physical schema changes.
 - An internal HTTP fragment isolates DuckDB caches, but it cannot make a mutable remote resource version-aware to the server. Concurrent cross-version queries require immutable/versioned remote URLs.

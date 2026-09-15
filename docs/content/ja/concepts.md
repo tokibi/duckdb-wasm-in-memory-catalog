@@ -64,16 +64,17 @@ files[].uri  file がどこにあるか
 
 `format_version: 2` では scanner の明示指定が必須です。Catalog は filename、extension、URI から scanner を選びません。
 
-現在サポートされているのは次の形式です。
+現在は Parquet と CSV をサポートしています。Scanner の設定と受け付ける option の一覧は [Scanner](./scanners.md) を参照してください。
 
 ```js
 scanner: {
   type: 'parquet',
   options: {},
 }
+
 ```
 
-Parquet scanner は published column の数、順序、名前、型と physical schema を検証します。
+Parquet scanner は published column の数、順序、名前、型と physical schema を検証します。CSV scanner は published column を read schema として使い、CSV header、column 数、値をその schema に対して検証します。CSV の既定値と option は [Scanner](./scanners.md) にまとめています。
 
 ## Scan URI と cache identity
 
