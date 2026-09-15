@@ -48,9 +48,8 @@ const jsonOptions = [
 
 describe('Scanner documentation', () => {
   it('documents every CSV option accepted by the metadata store in both locales', () => {
-    const optionsHeader = /\| Option \| Catalog value \| DuckDB value \| Default \| Description \|/
-    assert.match(english, optionsHeader)
-    assert.match(japanese, optionsHeader)
+    assert.match(english, /\| Option \| Accepted value \| Default \| Description \|/)
+    assert.match(japanese, /\| Option \| 使用できる値 \| 既定値 \| 説明 \|/)
     for (const option of csvOptions) {
       assert.match(metadataSource, new RegExp(`\\b${option}:`))
       assert.match(nativeSource, new RegExp('"' + option + '"'))
