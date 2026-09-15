@@ -99,7 +99,7 @@ CSV is also supported:
 }
 ```
 
-CSV options are optional. The supported options are `auto_detect`, `header`, `delimiter`, `quote`, `escape`, `comment`, `skip`, `nullstr`, `all_varchar`, `normalize_names`, `dateformat`, `timestampformat`, `compression`, `ignore_errors`, and `null_padding`. Boolean options require booleans, `skip` requires a non-negative safe integer, and string options require non-empty strings without NUL characters. Unknown options are rejected. Parquet options must be empty.
+See [Scanners](./scanners.md) for CSV defaults, validation boundaries, and the complete list of accepted options. Parquet options must be empty.
 
 ### Files
 

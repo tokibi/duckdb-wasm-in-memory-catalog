@@ -117,7 +117,7 @@ Catalog mutation statements are rejected. The host application remains the metad
 
 ## Use remote files
 
-`files[].uri` is a location, not a format declaration. For HTTP(S) files, configure DuckDB-Wasm's filesystem so it can reach the remote resource. The supported scanners are Parquet and CSV; select one explicitly in `table.scanner`.
+`files[].uri` is a location, not a format declaration. For HTTP(S) files, configure DuckDB-Wasm's filesystem so it can reach the remote resource. The supported scanners are Parquet and CSV; select one explicitly in `table.scanner`. See [Scanners](./scanners.md) for scanner options.
 
 The extension keeps the metadata URI unchanged but derives a DuckDB-facing scan URI using the table snapshot. URL fragments are not sent to the HTTP server, so gateways and Service Workers continue to receive the original base URI.
 

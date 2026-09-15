@@ -99,7 +99,7 @@ CSV も利用できます。
 }
 ```
 
-CSV options は省略できます。対応する option は `auto_detect`、`header`、`delimiter`、`quote`、`escape`、`comment`、`skip`、`nullstr`、`all_varchar`、`normalize_names`、`dateformat`、`timestampformat`、`compression`、`ignore_errors`、`null_padding` です。Boolean option は boolean、`skip` は 0 以上の safe integer、文字列 option は NUL を含まない空でない文字列である必要があります。未対応 option は拒否されます。Parquet の options は空である必要があります。
+CSV の既定値、Catalog と DuckDB の検証境界、受け付ける option の一覧は [Scanner](./scanners.md) を参照してください。Parquet の options は空である必要があります。
 
 ### File
 

@@ -117,7 +117,7 @@ Catalog の mutation statement は拒否されます。メタデータの author
 
 ## Remote file を使う
 
-`files[].uri` は location を表すだけで、format は表しません。HTTP(S) file を使う場合は、その remote resource にアクセスできるよう DuckDB-Wasm filesystem を設定します。対応する scanner は Parquet と CSV で、`table.scanner` で明示的に選択します。
+`files[].uri` は location を表すだけで、format は表しません。HTTP(S) file を使う場合は、その remote resource にアクセスできるよう DuckDB-Wasm filesystem を設定します。対応する scanner は Parquet と CSV で、`table.scanner` で明示的に選択します。Scanner option は [Scanner](./scanners.md) を参照してください。
 
 Extension は metadata 上の URI を変更せず保持し、DuckDB の scan 用には table snapshot を含む内部 URI を生成します。URL fragment は HTTP request には送られないため、gateway や Service Worker には元の base URI が届きます。
 

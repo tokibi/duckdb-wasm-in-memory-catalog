@@ -91,7 +91,7 @@ const snapshot = {
 }
 ```
 
-The catalog does not infer a scanner from the filename or URI. Every table declares its scanner explicitly. Use `type: 'csv'` for CSV files and provide CSV options when the file needs a non-default delimiter, header behavior, or other supported read setting.
+The catalog does not infer a scanner from the filename or URI. Every table declares its scanner explicitly. Use `type: 'csv'` for CSV files and provide CSV options when the file needs a non-default delimiter, header behavior, or other supported read setting. See [Scanners](./scanners.md) for the available options.
 
 ## 4. Initialize the catalog
 

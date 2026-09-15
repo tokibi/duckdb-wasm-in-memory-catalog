@@ -64,7 +64,7 @@ The scanner is table-level because all files forming one table are expected to s
 
 `format_version: 2` requires an explicit scanner. The catalog never chooses one from a filename, extension, or URI shape.
 
-The current implementation supports:
+The current implementation supports Parquet and CSV. See [Scanners](./scanners.md) for scanner configuration and the complete list of accepted options.
 
 ```js
 scanner: {
@@ -72,16 +72,9 @@ scanner: {
   options: {},
 }
 
-scanner: {
-  type: 'csv',
-  options: {
-    delimiter: ',',
-    header: true,
-  },
-}
 ```
 
-The Parquet scanner validates the physical schema against the published column count, order, names, and types. The CSV scanner uses the published columns as its read schema and validates the CSV header, column count, and values against that schema. CSV `header` defaults to DuckDB's automatic header detection; set it explicitly when the file format is known.
+The Parquet scanner validates the physical schema against the published column count, order, names, and types. The CSV scanner uses the published columns as its read schema and validates the CSV header, column count, and values against that schema. See [Scanners](./scanners.md) for CSV defaults and options.
 
 ## Scan URI and cache identity
 
