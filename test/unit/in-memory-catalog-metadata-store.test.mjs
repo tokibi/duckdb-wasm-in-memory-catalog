@@ -312,7 +312,23 @@ describe('InMemoryCatalogMetadataStore', () => {
     const supportedCsv = snapshot()
     supportedCsv.schemas[0].tables[0].scanner = {
       type: 'csv',
-      options: { delimiter: '\t', header: true, skip: 1, all_varchar: true },
+      options: {
+        delimiter: '\t',
+        header: true,
+        skip: 1,
+        nullstr: ['', 'NULL'],
+        allow_quoted_nulls: false,
+        buffer_size: 4096,
+        decimal_separator: ',',
+        encoding: 'utf-8',
+        force_not_null: ['id'],
+        max_line_size: 2000000,
+        new_line: '\\n',
+        parallel: false,
+        sample_size: -1,
+        strict_mode: true,
+        thousands: '_',
+      },
     }
     await session.replaceCatalogSnapshot(supportedCsv)
     assert.deepEqual(
@@ -334,6 +350,33 @@ describe('InMemoryCatalogMetadataStore', () => {
       () => session.replaceCatalogSnapshot(options),
       'RC_METADATA_INVALID',
     )
+
+    for (const invalidOption of ['all_varchar', 'normalize_names']) {
+      const excluded = snapshot()
+      excluded.schemas[0].tables[0].scanner.type = 'csv'
+      excluded.schemas[0].tables[0].scanner.options = { [invalidOption]: true }
+      await expectCode(
+        () => session.replaceCatalogSnapshot(excluded),
+        'RC_METADATA_INVALID',
+      )
+    }
+
+    for (const [option, value] of [
+      ['force_not_null', ['id', 1]],
+      ['force_not_null', []],
+      ['sample_size', 0],
+      ['sample_size', -2],
+      ['buffer_size', 0],
+      ['max_line_size', 0],
+    ]) {
+      const invalidTypes = snapshot()
+      invalidTypes.schemas[0].tables[0].scanner.type = 'csv'
+      invalidTypes.schemas[0].tables[0].scanner.options = { [option]: value }
+      await expectCode(
+        () => session.replaceCatalogSnapshot(invalidTypes),
+        'RC_METADATA_INVALID',
+      )
+    }
 
     assert.equal(store.currentRevision('workspace'), 1n)
   })

@@ -212,9 +212,11 @@ static string JSONString(yyjson_val *object, const char *key) {
 
 static bool IsSupportedCSVScannerOption(const string &key) {
 	static const unordered_set<string> supported_options {
-	    "auto_detect", "header",       "delimiter",      "quote",       "escape",
-	    "comment",     "skip",         "nullstr",        "all_varchar", "normalize_names",
-	    "dateformat",  "timestampformat", "compression",  "ignore_errors", "null_padding",
+	    "auto_detect",       "header",           "delimiter",       "quote",          "escape",
+	    "comment",           "skip",             "nullstr",         "dateformat",     "timestampformat",
+	    "compression",       "ignore_errors",    "null_padding",    "allow_quoted_nulls",
+	    "buffer_size",       "decimal_separator", "encoding",       "force_not_null", "max_line_size",
+	    "new_line",          "parallel",         "sample_size",     "strict_mode",    "thousands",
 	};
 	return supported_options.find(key) != supported_options.end();
 }
@@ -226,23 +228,36 @@ static string CSVScannerOptionName(const string &key) {
 	return key;
 }
 
+static bool IsCSVScannerBooleanOption(const string &key) {
+	return key == "auto_detect" || key == "header" || key == "ignore_errors" || key == "null_padding" ||
+	       key == "allow_quoted_nulls" || key == "parallel" || key == "strict_mode";
+}
+
+static bool IsCSVScannerIntegerOption(const string &key) {
+	return key == "skip" || key == "buffer_size" || key == "max_line_size" || key == "sample_size";
+}
+
+static bool IsCSVScannerStringArrayOption(const string &key) {
+	return key == "force_not_null" || key == "nullstr";
+}
+
 static Value DecodeScannerOption(const string &key, yyjson_val *value) {
 	if (!IsSupportedCSVScannerOption(key)) {
 		DescriptorInvalid();
 	}
-	const auto is_boolean_option = key == "auto_detect" || key == "header" || key == "all_varchar" ||
-	                               key == "normalize_names" || key == "ignore_errors" || key == "null_padding";
-	const auto is_integer_option = key == "skip";
+	const auto is_boolean_option = IsCSVScannerBooleanOption(key);
+	const auto is_integer_option = IsCSVScannerIntegerOption(key);
+	const auto is_array_option = IsCSVScannerStringArrayOption(key);
 	if (is_boolean_option && !yyjson_is_bool(value)) {
 		DescriptorInvalid();
 	}
-	if (is_integer_option && ((!yyjson_is_sint(value) || yyjson_get_sint(value) < 0) && !yyjson_is_uint(value))) {
+	if (is_integer_option && !yyjson_is_sint(value) && !yyjson_is_uint(value)) {
 		DescriptorInvalid();
 	}
-	if (is_integer_option && yyjson_is_uint(value) && yyjson_get_uint(value) > NumericLimits<int64_t>::Maximum()) {
+	if (is_array_option && !yyjson_is_arr(value) && !(key == "nullstr" && yyjson_is_str(value))) {
 		DescriptorInvalid();
 	}
-	if (!is_boolean_option && !is_integer_option && !yyjson_is_str(value)) {
+	if (!is_boolean_option && !is_integer_option && !is_array_option && !yyjson_is_str(value)) {
 		DescriptorInvalid();
 	}
 	if (yyjson_is_bool(value)) {
@@ -250,16 +265,53 @@ static Value DecodeScannerOption(const string &key, yyjson_val *value) {
 	}
 	if (yyjson_is_str(value)) {
 		string result(unsafe_yyjson_get_str(value), unsafe_yyjson_get_len(value));
-		if (result.empty() || result.find('\0') != string::npos) {
+		if ((key != "nullstr" && result.empty()) || result.find('\0') != string::npos) {
 			DescriptorInvalid();
 		}
 		return Value(std::move(result));
 	}
 	if (yyjson_is_sint(value)) {
-		return Value::BIGINT(yyjson_get_sint(value));
+		const auto number = yyjson_get_sint(value);
+		if ((key != "sample_size" && number < 0) || (key == "sample_size" && (number < 1 && number != -1)) ||
+		    ((key == "buffer_size" || key == "max_line_size") && number == 0)) {
+			DescriptorInvalid();
+		}
+		if (key == "buffer_size") {
+			return Value::UBIGINT(static_cast<uint64_t>(number));
+		}
+		return Value::BIGINT(number);
 	}
 	if (yyjson_is_uint(value)) {
-		return Value::UBIGINT(yyjson_get_uint(value));
+		const auto number = yyjson_get_uint(value);
+		if (number > NumericLimits<int64_t>::Maximum()) {
+			DescriptorInvalid();
+		}
+		if ((key == "buffer_size" || key == "max_line_size") && number == 0) {
+			DescriptorInvalid();
+		}
+		if (key == "buffer_size") {
+			return Value::UBIGINT(number);
+		}
+		return Value::BIGINT(static_cast<int64_t>(number));
+	}
+	if (yyjson_is_arr(value)) {
+		vector<Value> values;
+		if (key == "force_not_null" && yyjson_arr_size(value) == 0) {
+			DescriptorInvalid();
+		}
+		size_t index, count;
+		yyjson_val *item;
+		yyjson_arr_foreach(value, index, count, item) {
+			if (!yyjson_is_str(item)) {
+				DescriptorInvalid();
+			}
+			string item_value(unsafe_yyjson_get_str(item), unsafe_yyjson_get_len(item));
+			if ((key == "force_not_null" && item_value.empty()) || item_value.find('\0') != string::npos) {
+				DescriptorInvalid();
+			}
+			values.emplace_back(std::move(item_value));
+		}
+		return Value::LIST(LogicalType::VARCHAR, std::move(values));
 	}
 	DescriptorInvalid();
 }

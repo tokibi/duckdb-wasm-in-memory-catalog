@@ -18,14 +18,23 @@
     escape: 'string',
     comment: 'string',
     skip: 'nonnegative_integer',
-    nullstr: 'string',
-    all_varchar: 'boolean',
-    normalize_names: 'boolean',
+    nullstr: 'string_or_string_array',
     dateformat: 'string',
     timestampformat: 'string',
     compression: 'string',
     ignore_errors: 'boolean',
     null_padding: 'boolean',
+    allow_quoted_nulls: 'boolean',
+    buffer_size: 'positive_integer',
+    decimal_separator: 'string',
+    encoding: 'string',
+    force_not_null: 'string_array',
+    max_line_size: 'positive_integer',
+    new_line: 'string',
+    parallel: 'boolean',
+    sample_size: 'integer',
+    strict_mode: 'boolean',
+    thousands: 'string',
   })
   const DECIMAL_REVISION_PATTERN = /^(0|[1-9][0-9]*)$/
   const MAX_UINT64 = (1n << 64n) - 1n
@@ -499,9 +508,29 @@
           (typeof value !== 'string' || value.length === 0 || value.includes('\0'))) {
         invalid(`${path}.options.${key} must be a non-empty string without NUL`)
       }
+      if (expectedType === 'string_array' &&
+          (!Array.isArray(value) || value.length === 0 || value.some((item) =>
+            typeof item !== 'string' || item.length === 0 || item.includes('\0')))) {
+        invalid(`${path}.options.${key} must be a non-empty array of non-empty strings without NUL`)
+      }
+      if (expectedType === 'string_or_string_array' &&
+          ((typeof value !== 'string' && !Array.isArray(value)) ||
+            (typeof value === 'string' && value.includes('\0')) ||
+            (Array.isArray(value) && value.some((item) =>
+              typeof item !== 'string' || item.includes('\0'))))) {
+        invalid(`${path}.options.${key} must be a string or an array of strings without NUL`)
+      }
       if (expectedType === 'nonnegative_integer' &&
           (!Number.isSafeInteger(value) || value < 0)) {
         invalid(`${path}.options.${key} must be a non-negative safe integer`)
+      }
+      if (expectedType === 'positive_integer' &&
+          (!Number.isSafeInteger(value) || value <= 0)) {
+        invalid(`${path}.options.${key} must be a positive safe integer`)
+      }
+      if (expectedType === 'integer' &&
+          (!Number.isSafeInteger(value) || value < 1 && value !== -1)) {
+        invalid(`${path}.options.${key} must be -1 or a positive safe integer`)
       }
       options[key] = value
     }
