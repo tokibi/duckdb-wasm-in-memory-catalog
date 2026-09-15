@@ -45,6 +45,15 @@ const jsonOptions = [
   'dateformat',
   'timestampformat',
 ]
+const xlsxOptions = [
+  'header',
+  'sheet',
+  'range',
+  'all_varchar',
+  'ignore_errors',
+  'stop_at_empty',
+  'empty_as_varchar',
+]
 
 describe('Scanner documentation', () => {
   it('documents every CSV option accepted by the metadata store in both locales', () => {
@@ -57,14 +66,20 @@ describe('Scanner documentation', () => {
       assert.match(english, optionRow)
       assert.match(japanese, optionRow)
     }
-    assert.doesNotMatch(metadataSource, /\ball_varchar:/)
     assert.doesNotMatch(metadataSource, /\bnormalize_names:/)
-    assert.doesNotMatch(nativeSource, /"all_varchar"/)
     assert.doesNotMatch(nativeSource, /"normalize_names"/)
-    assert.doesNotMatch(english, /\| `all_varchar` \|/)
     assert.doesNotMatch(english, /\| `normalize_names` \|/)
-    assert.doesNotMatch(japanese, /\| `all_varchar` \|/)
     assert.doesNotMatch(japanese, /\| `normalize_names` \|/)
+  })
+
+  it('documents every XLSX option accepted by the catalog', () => {
+    for (const option of xlsxOptions) {
+      assert.match(metadataSource, new RegExp(`\\b${option}:`))
+      assert.match(nativeSource, new RegExp('"' + option + '"'))
+      const optionRow = new RegExp('\\| `' + option + '` \\|')
+      assert.match(english, optionRow)
+      assert.match(japanese, optionRow)
+    }
   })
 
   it('documents every JSON option and nested type accepted by the catalog', () => {
@@ -85,9 +100,11 @@ describe('Scanner documentation', () => {
     assert.match(english, /type: 'parquet'/)
     assert.match(english, /type: 'csv'/)
     assert.match(english, /type: 'json'/)
+    assert.match(english, /type: 'xlsx'/)
     assert.match(japanese, /type: 'parquet'/)
     assert.match(japanese, /type: 'csv'/)
     assert.match(japanese, /type: 'json'/)
+    assert.match(japanese, /type: 'xlsx'/)
     assert.match(viteConfig, /link: '\/scanners\.md'/)
   })
 

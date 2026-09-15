@@ -1,6 +1,6 @@
 ---
 title: Scanner
-description: Catalog が受け付ける Parquet、CSV、JSON scanner の設定方法。
+description: Catalog が受け付ける Parquet、CSV、JSON、XLSX scanner の設定方法。
 ---
 
 # Scanner
@@ -112,3 +112,33 @@ scanner: {
 
 - `columns`はcatalog metadataから渡します。Schema推論用optionは受け付けません。
 - 仮想/partition column、`union_by_name`、alias、COPY専用optionは未対応です。
+
+## XLSX
+
+XLSXではDuckDBの`read_xlsx`を使います。1つのテーブルに指定できるファイルは1つだけです。`.xlsx`に対応し、古い`.xls`には対応しません。
+
+```js
+scanner: {
+  type: 'xlsx',
+  options: {
+    sheet: 'Data',
+    header: true,
+  },
+}
+```
+
+検出された列の名前と順序は、catalogの`columns`と一致する必要があります。値は読み取り時にcatalogで指定した型へ変換されます。省略したoptionにはDuckDBの既定値が使われます。
+
+### XLSX options
+
+| Option | 使用できる値 | 既定値 | 説明 |
+| --- | --- | --- | --- |
+| `header` | `true` / `false` | 自動検出 | 先頭行を列名として扱います。 |
+| `sheet` | NULを含まない空でない文字列 | 最初のシート | シート名です。 |
+| `range` | NULを含まない空でない文字列 | 自動検出 | DuckDB形式のセル範囲です。 |
+| `all_varchar` | `true` / `false` | `false` | すべての列を`VARCHAR`として読み取ってからcatalogの型へ変換します。 |
+| `ignore_errors` | `true` / `false` | `false` | 型変換できない値を`NULL`にします。 |
+| `stop_at_empty` | `true` / `false` | `true`。`range`指定時は`false` | 空の行で読み取りを止めます。 |
+| `empty_as_varchar` | `true` / `false` | `false` | 空の列を`VARCHAR`として推論します。 |
+
+列名はcatalogで定義するため、`normalize_names`は指定できません。

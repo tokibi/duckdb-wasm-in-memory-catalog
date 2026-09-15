@@ -74,7 +74,7 @@ Each column has:
 }
 ```
 
-The physical file schema must match the published column count, order, names, and compatible DuckDB types. Parquet metadata is checked directly; CSV and JSON use the published columns as their read schema and validate values while binding and scanning. See [Scanners](/scanners.md) for supported column types and scanner options.
+The physical file schema must match the published columns. Parquet metadata is checked directly; CSV and JSON use the published columns as their read schema; XLSX validates detected names and casts values to the published types. See [Scanners](/scanners.md) for supported column types and scanner options.
 
 ### Scanner
 
@@ -124,7 +124,7 @@ const catalog = await InMemoryCatalogController.initialize(
 )
 ```
 
-Creates a DuckDB connection, loads Parquet and the catalog extension, opens a Worker-side workspace session, publishes the initial snapshot, and attaches the catalog read-only. The JSON extension is loaded before the first publication that uses a JSON scanner or `JSON` column.
+Creates a DuckDB connection, loads Parquet and the catalog extension, opens a Worker-side workspace session, publishes the initial snapshot, and attaches the catalog read-only. Required scanner extensions are loaded before their first publication: JSON for a JSON scanner or `JSON` column, and Excel for an XLSX scanner.
 
 `options`:
 
@@ -215,7 +215,7 @@ Important codes include:
 
 Snapshot validation can return additional catalog-specific codes from the Worker/extension. Treat the error code as the machine-readable value and the message as diagnostic text.
 
-DuckDB queries report `RC_JSON_SCHEMA_MISMATCH` when `read_json` does not produce the published columns, `RC_CATALOG_VIEW_INVALID` when a view cannot be parsed or bound, and `RC_CATALOG_VIEW_CYCLE` when view dependencies are circular. These codes appear in the DuckDB query error message rather than as `InMemoryCatalogControllerError.code`.
+DuckDB queries report `RC_JSON_SCHEMA_MISMATCH` when `read_json` does not produce the published columns, `RC_XLSX_SCHEMA_MISMATCH` when `read_xlsx` does not produce the published column names, `RC_CATALOG_VIEW_INVALID` when a view cannot be parsed or bound, and `RC_CATALOG_VIEW_CYCLE` when view dependencies are circular. These codes appear in the DuckDB query error message rather than as `InMemoryCatalogControllerError.code`.
 
 ## Migration from revision-based publications
 
@@ -228,8 +228,8 @@ Remove `initialRevision` from `initialize(db, worker, options, initialRevision, 
 - The extension build uses the DuckDB commit and Emscripten versions specified in `versions.lock`; these build inputs are separate from the DuckDB-Wasm version selected by the host application.
 - Read-only catalog; DuckDB-side catalog mutation is rejected.
 - `format_version: 2` supports tables; `format_version: 3` adds views.
-- Parquet and CSV are supported scanners.
-- Parquet scanner options must be empty. CSV options are limited to the documented allowlist.
+- Parquet, CSV, JSON, and XLSX are supported scanners.
+- Scanner options are limited to the documented allowlists.
 - The host must provide complete column metadata; schema inference is not performed by the catalog.
 - Table `snapshot` values are application-managed and must change when represented bytes or physical schema changes.
 - An internal HTTP fragment isolates DuckDB caches, but it cannot make a mutable remote resource version-aware to the server. Concurrent cross-version queries require immutable/versioned remote URLs.

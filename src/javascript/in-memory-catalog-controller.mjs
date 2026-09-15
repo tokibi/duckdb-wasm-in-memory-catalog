@@ -42,7 +42,7 @@ export class InMemoryCatalogController {
   #attached = false
   #state = 'active'
   #recoveryReported = false
-  #jsonLoaded = false
+  #loadedExtensions = new Set()
 
   static async initialize(db, worker, options, initialSnapshot) {
     const normalized = normalizeOptions(options)
@@ -118,7 +118,7 @@ export class InMemoryCatalogController {
       ))
     }
     const operation = this.#pending.then(async () => {
-      await this.#ensureJSONExtension(submittedSnapshot)
+      await this.#ensureRequiredExtensions(submittedSnapshot)
       const result = await this.#session.request(
         'IN_MEMORY_CATALOG_REPLACE_SNAPSHOT',
         'IN_MEMORY_CATALOG_REPLACE_SNAPSHOT_RESULT',
@@ -153,7 +153,7 @@ export class InMemoryCatalogController {
       ))
     }
     const operation = this.#pending.then(async () => {
-      await this.#ensureJSONExtension(submittedTable)
+      await this.#ensureRequiredExtensions(submittedTable)
       const result = await this.#session.request(
         'IN_MEMORY_CATALOG_REPLACE_TABLE',
         'IN_MEMORY_CATALOG_REPLACE_TABLE_RESULT',
@@ -275,22 +275,27 @@ export class InMemoryCatalogController {
     }
   }
 
-  async #ensureJSONExtension(metadata) {
-    if (this.#jsonLoaded || !usesJSONExtension(metadata)) return
-    await this.#connection.query('LOAD json')
-    this.#jsonLoaded = true
+  async #ensureRequiredExtensions(metadata) {
+    for (const extension of requiredExtensions(metadata)) {
+      if (this.#loadedExtensions.has(extension)) continue
+      await this.#connection.query(`LOAD ${extension}`)
+      this.#loadedExtensions.add(extension)
+    }
   }
 }
 
-function usesJSONExtension(metadata) {
+function requiredExtensions(metadata) {
   const tables = Array.isArray(metadata?.schemas)
     ? metadata.schemas.flatMap((schema) => Array.isArray(schema?.tables) ? schema.tables : [])
     : [metadata]
-  return tables.some((table) =>
+  const extensions = new Set()
+  if (tables.some((table) =>
     table?.scanner?.type === 'json' ||
     (Array.isArray(table?.columns) && table.columns.some((column) =>
       typeof column?.type === 'string' && /(^|[^A-Za-z0-9_$])JSON([^A-Za-z0-9_$]|$)/u.test(column.type))),
-  )
+  )) extensions.add('json')
+  if (tables.some((table) => table?.scanner?.type === 'xlsx')) extensions.add('excel')
+  return extensions
 }
 
 class WorkspaceSessionClient {

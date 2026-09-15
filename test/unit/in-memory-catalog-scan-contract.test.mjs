@@ -26,9 +26,16 @@ describe('In-Memory Catalog schema scan contract', () => {
 
   it('binds JSON through the loaded public table function without linking JSON internals', () => {
     assert.match(extensionSource, /scanner\.type == "json" \? "read_json"/)
-    assert.match(extensionSource, /if \(scanner\.type == "json"\)[\s\S]*function\.bind\(context, input/)
+    assert.match(extensionSource, /scanner\.type == "json" \|\| scanner\.type == "xlsx"[\s\S]*function\.bind\(context, input/)
     assert.match(extensionSource, /RC_JSON_SCHEMA_MISMATCH/)
     assert.doesNotMatch(extensionSource, /json_multi_file_info\.hpp/)
     assert.doesNotMatch(extensionSource, /JSONMultiFileInfo/)
+  })
+
+  it('binds XLSX through read_xlsx and validates catalog column names', () => {
+    assert.match(extensionSource, /scanner\.type == "xlsx" \? "read_xlsx"/)
+    assert.match(extensionSource, /scanner\.type == "xlsx" \? LogicalType::VARCHAR/)
+    assert.match(extensionSource, /RC_XLSX_SCHEMA_MISMATCH/)
+    assert.doesNotMatch(extensionSource, /xlsx_reader\.hpp|XLSXReader/)
   })
 })
