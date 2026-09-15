@@ -36,12 +36,20 @@ const csvOptions = [
   'strict_mode',
   'thousands',
 ]
+const jsonOptions = [
+  'format',
+  'compression',
+  'records',
+  'ignore_errors',
+  'maximum_object_size',
+  'dateformat',
+  'timestampformat',
+]
 
 describe('Scanner documentation', () => {
   it('documents every CSV option accepted by the metadata store in both locales', () => {
-    const optionsHeader = /\| Option \| Catalog value \| DuckDB value \| Default \| Description \|/
-    assert.match(english, optionsHeader)
-    assert.match(japanese, optionsHeader)
+    assert.match(english, /\| Option \| Accepted value \| Default \| Description \|/)
+    assert.match(japanese, /\| Option \| 使用できる値 \| 既定値 \| 説明 \|/)
     for (const option of csvOptions) {
       assert.match(metadataSource, new RegExp(`\\b${option}:`))
       assert.match(nativeSource, new RegExp('"' + option + '"'))
@@ -59,11 +67,27 @@ describe('Scanner documentation', () => {
     assert.doesNotMatch(japanese, /\| `normalize_names` \|/)
   })
 
+  it('documents every JSON option and nested type accepted by the catalog', () => {
+    for (const option of jsonOptions) {
+      assert.match(metadataSource, new RegExp(`\\b${option}:`))
+      assert.match(nativeSource, new RegExp('"' + option + '"'))
+      const optionRow = new RegExp('\\| `' + option + '` \\|')
+      assert.match(english, optionRow)
+      assert.match(japanese, optionRow)
+    }
+    for (const type of ['JSON', 'STRUCT', 'LIST']) {
+      assert.match(english, new RegExp('`' + type + '`'))
+      assert.match(japanese, new RegExp('`' + type + '`'))
+    }
+  })
+
   it('exposes the dedicated scanner page in the documentation navigation', () => {
     assert.match(english, /type: 'parquet'/)
     assert.match(english, /type: 'csv'/)
+    assert.match(english, /type: 'json'/)
     assert.match(japanese, /type: 'parquet'/)
     assert.match(japanese, /type: 'csv'/)
+    assert.match(japanese, /type: 'json'/)
     assert.match(viteConfig, /link: '\/scanners\.md'/)
   })
 

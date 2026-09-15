@@ -43,6 +43,9 @@ function currentTarget() {
   const csvTableName = snapshot?.schemas?.[0]?.tables?.find(
     (table) => table?.scanner?.type === 'csv',
   )?.name
+  const jsonTableName = snapshot?.schemas?.[0]?.tables?.find(
+    (table) => table?.scanner?.type === 'json',
+  )?.name
   const viewName = snapshot?.schemas?.[0]?.views?.[0]?.name
   if (typeof schemaName !== 'string' || !schemaName) return null
   if (typeof tableName !== 'string' || !tableName) return null
@@ -52,6 +55,7 @@ function currentTarget() {
     schemaName,
     tableName,
     csvTableName: typeof csvTableName === 'string' && csvTableName ? csvTableName : null,
+    jsonTableName: typeof jsonTableName === 'string' && jsonTableName ? jsonTableName : null,
     viewName: typeof viewName === 'string' && viewName ? viewName : null,
   }
 }
@@ -88,6 +92,19 @@ function examplesFor(target) {
       .join('.')
     examples.csvRows = `SELECT *
 FROM ${csvTable}
+ORDER BY event_id;`
+  }
+
+  if (target.jsonTableName) {
+    const jsonTable = [target.catalogName, target.schemaName, target.jsonTableName]
+      .map(quoteIdentifier)
+      .join('.')
+    examples.jsonRows = `SELECT
+  event_id,
+  context.browser AS browser,
+  context.tags AS tags,
+  payload->>'$.action' AS action
+FROM ${jsonTable}
 ORDER BY event_id;`
   }
 

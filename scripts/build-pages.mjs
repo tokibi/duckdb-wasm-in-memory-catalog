@@ -81,6 +81,23 @@ const csvFixture = [
 ].join('\n')
 await writeFile(resolve(outputRoot, 'data/demo.csv'), csvFixture)
 
+const jsonFixture = [
+  {
+    event_id: 1,
+    context: { browser: 'Safari', tags: ['web', 'mobile'] },
+    payload: { action: 'open', duration_ms: 120 },
+  },
+  {
+    event_id: 2,
+    context: { browser: 'Chrome', tags: ['web', 'desktop'] },
+    payload: { action: 'query', duration_ms: 42 },
+  },
+]
+await writeFile(
+  resolve(outputRoot, 'data/demo-events.json'),
+  `${JSON.stringify(jsonFixture, null, 2)}\n`,
+)
+
 process.stdout.write(
   `Built GitHub Pages demo: ${metadata.rows} rows, ${fixtureBytes.byteLength.toLocaleString()} bytes\n`,
 )

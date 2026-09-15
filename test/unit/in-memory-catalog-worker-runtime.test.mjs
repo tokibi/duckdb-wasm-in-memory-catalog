@@ -125,6 +125,33 @@ describe('In-Memory Catalog Worker runtime', () => {
     )
   })
 
+  it('transfers json scanner options and nested types through the Worker bridge', async () => {
+    const store = new InMemoryCatalogMetadataStore()
+    const runtime = createInMemoryCatalogWorkerRuntime(store)
+    const port = new FakePort()
+    await runtime.handleMessage({
+      data: { type: 'IN_MEMORY_CATALOG_OPEN_WORKSPACE_SESSION', workspace_id: 'workspace' },
+      ports: [port],
+    })
+    const candidate = snapshot()
+    candidate.schemas[0].tables[0].scanner = {
+      type: 'json',
+      options: { format: 'array', records: 'true' },
+    }
+    candidate.schemas[0].tables[0].columns = [
+      { name: 'payload', type: 'STRUCT(id BIGINT, tags VARCHAR[], raw JSON)', nullable: true },
+    ]
+    await port.dispatch({
+      type: 'IN_MEMORY_CATALOG_REPLACE_SNAPSHOT',
+      request_id: 'replace-json-1',
+      snapshot: candidate,
+    })
+
+    const descriptor = JSON.parse(runtime.bridge.lookupTable('workspace', '1', 'main', 'table1'))
+    assert.deepEqual(descriptor.scanner, candidate.schemas[0].tables[0].scanner)
+    assert.deepEqual(descriptor.columns, candidate.schemas[0].tables[0].columns)
+  })
+
   it('acknowledges a dedicated table replacement without exposing a revision', async () => {
     const store = new InMemoryCatalogMetadataStore()
     const runtime = createInMemoryCatalogWorkerRuntime(store)

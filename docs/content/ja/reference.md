@@ -74,7 +74,7 @@ Catalog publication では catalog 全体の complete snapshot を送ります�
 }
 ```
 
-Physical file schema は published column の数、順序、名前、および互換性のある DuckDB type と一致する必要があります。Parquet では metadata を直接検証し、CSV では published column を read schema として使い、bind と scan の際に header と値を検証します。
+Physical file schemaはpublished columnの数、順序、名前、および互換性のあるDuckDB typeと一致する必要があります。Parquetではmetadataを直接検証し、CSVとJSONではpublished columnをread schemaとして使い、bindとscanの際に値を検証します。対応typeとscanner optionは[Scanner](/ja/scanners.md)を参照してください。
 
 ### Scanner
 
@@ -124,7 +124,7 @@ const catalog = await InMemoryCatalogController.initialize(
 )
 ```
 
-DuckDB connection を作成し、Parquet と catalog extension をロードし、Worker-side workspace session を開き、initial snapshot を publish して catalog を read-only で attach します。
+DuckDB connectionを作成し、Parquetとcatalog extensionをロードし、Worker-side workspace sessionを開き、initial snapshotをpublishしてcatalogをread-onlyでattachします。JSON scannerまたは`JSON` columnを使う最初のpublicationの前にJSON extensionをロードします。
 
 `options`:
 
@@ -215,7 +215,7 @@ Controller failure は `InMemoryCatalogControllerError` として throw され�
 
 Snapshot validation では Worker / extension から追加の catalog-specific code が返ることがあります。分岐には error code を使い、message は診断情報として扱ってください。
 
-View を parse または bind できない場合、DuckDB query は `RC_CATALOG_VIEW_INVALID` を報告します。View の依存関係が循環している場合は `RC_CATALOG_VIEW_CYCLE` を報告します。これらは `InMemoryCatalogControllerError.code` ではなく、DuckDB query の error message に含まれます。
+`read_json`の出力がpublished columnと一致しない場合は`RC_JSON_SCHEMA_MISMATCH`、viewをparseまたはbindできない場合は`RC_CATALOG_VIEW_INVALID`、viewの依存関係が循環している場合は`RC_CATALOG_VIEW_CYCLE`を報告します。これらは`InMemoryCatalogControllerError.code`ではなく、DuckDB queryのerror messageに含まれます。
 
 ## Revision-based publication からの移行
 

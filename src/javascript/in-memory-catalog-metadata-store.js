@@ -9,7 +9,7 @@
     'VARCHAR',
     'DATE', 'TIMESTAMP', 'TIMESTAMP_TZ',
   ])
-  const SUPPORTED_SCANNERS = new Set(['parquet', 'csv'])
+  const SUPPORTED_SCANNERS = new Set(['parquet', 'csv', 'json'])
   const CSV_SCANNER_OPTION_TYPES = Object.freeze({
     auto_detect: 'boolean',
     header: 'boolean',
@@ -35,6 +35,15 @@
     sample_size: 'integer',
     strict_mode: 'boolean',
     thousands: 'string_allow_empty',
+  })
+  const JSON_SCANNER_OPTION_TYPES = Object.freeze({
+    format: 'json_format',
+    compression: 'string',
+    records: 'json_records',
+    ignore_errors: 'boolean',
+    maximum_object_size: 'json_object_size',
+    dateformat: 'string',
+    timestampformat: 'string',
   })
   const DECIMAL_REVISION_PATTERN = /^(0|[1-9][0-9]*)$/
   const MAX_UINT64 = (1n << 64n) - 1n
@@ -438,7 +447,7 @@
       const columnPath = `${path}.columns[${index}]`
       if (!isRecord(column)) invalid(`${columnPath} must be an object`)
       const columnName = uniqueName(column.name, columnNames, `${columnPath}.name`)
-      if (typeof column.type !== 'string' || !SUPPORTED_TYPES.has(column.type)) {
+      if (typeof column.type !== 'string' || !isSupportedColumnType(column.type)) {
         invalid(`${columnPath}.type is unsupported`)
       }
       if (typeof column.nullable !== 'boolean') invalid(`${columnPath}.nullable must be boolean`)
@@ -495,11 +504,12 @@
       return deepFreeze({ type, options: {} })
     }
 
+    const optionTypes = type === 'csv' ? CSV_SCANNER_OPTION_TYPES : JSON_SCANNER_OPTION_TYPES
     const options = {}
     for (const [key, value] of Object.entries(input.options)) {
-      const expectedType = CSV_SCANNER_OPTION_TYPES[key]
+      const expectedType = optionTypes[key]
       if (!expectedType) {
-        invalid(`${path}.options.${key} is not supported for csv`)
+        invalid(`${path}.options.${key} is not supported for ${type}`)
       }
       if (expectedType === 'boolean' && typeof value !== 'boolean') {
         invalid(`${path}.options.${key} must be boolean`)
@@ -532,13 +542,100 @@
           (!Number.isSafeInteger(value) || value <= 0)) {
         invalid(`${path}.options.${key} must be a positive safe integer`)
       }
+      if (expectedType === 'json_object_size' &&
+          (!Number.isSafeInteger(value) || value <= 0 || value > 0xffffffff)) {
+        invalid(`${path}.options.${key} must be a positive integer no greater than 4294967295`)
+      }
       if (expectedType === 'integer' &&
           (!Number.isSafeInteger(value) || value < 1 && value !== -1)) {
         invalid(`${path}.options.${key} must be -1 or a positive safe integer`)
       }
+      if (expectedType === 'json_format' &&
+          !['auto', 'array', 'newline_delimited', 'unstructured'].includes(value)) {
+        invalid(`${path}.options.${key} must be auto, array, newline_delimited, or unstructured`)
+      }
+      if (expectedType === 'json_records' && !['auto', 'true', 'false'].includes(value)) {
+        invalid(`${path}.options.${key} must be auto, true, or false`)
+      }
       options[key] = value
     }
     return deepFreeze({ type, options })
+  }
+
+  function isSupportedColumnType(value) {
+    if (value.length === 0 || value.length > 4096 || value.includes('\0')) return false
+    let position = 0
+
+    const skipWhitespace = () => {
+      while (position < value.length && /\s/u.test(value[position])) position += 1
+    }
+    const consume = (token) => {
+      skipWhitespace()
+      if (!value.startsWith(token, position)) return false
+      position += token.length
+      return true
+    }
+    const readWord = () => {
+      skipWhitespace()
+      const match = /^[A-Za-z_][A-Za-z0-9_$]*/u.exec(value.slice(position))
+      if (!match) return undefined
+      position += match[0].length
+      return match[0]
+    }
+    const readFieldName = () => {
+      skipWhitespace()
+      if (value[position] !== '"') return readWord()
+      position += 1
+      let result = ''
+      while (position < value.length) {
+        if (value[position] !== '"') {
+          result += value[position]
+          position += 1
+          continue
+        }
+        if (value[position + 1] === '"') {
+          result += '"'
+          position += 2
+          continue
+        }
+        position += 1
+        return result.length > 0 ? result : undefined
+      }
+      return undefined
+    }
+    const parseType = (depth = 0) => {
+      if (depth > 32) return false
+      const typeName = readWord()
+      if (!typeName || typeName !== typeName.toUpperCase()) return false
+      if (typeName === 'STRUCT') {
+        if (!consume('(')) return false
+        const names = new Set()
+        let fieldCount = 0
+        while (true) {
+          const fieldName = readFieldName()
+          if (!fieldName || names.has(fieldName.toLowerCase())) return false
+          names.add(fieldName.toLowerCase())
+          if (!parseType(depth + 1)) return false
+          fieldCount += 1
+          skipWhitespace()
+          if (consume(')')) break
+          if (!consume(',')) return false
+        }
+        if (fieldCount === 0) return false
+      } else if (typeName === 'LIST') {
+        if (!consume('(') || !parseType(depth + 1) || !consume(')')) return false
+      } else if (typeName !== 'JSON' && !SUPPORTED_TYPES.has(typeName)) {
+        return false
+      }
+      while (consume('[')) {
+        if (!consume(']')) return false
+      }
+      return true
+    }
+
+    if (!parseType()) return false
+    skipWhitespace()
+    return position === value.length
   }
 
   function parseBridgeRevision(value) {

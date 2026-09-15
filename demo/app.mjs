@@ -43,6 +43,7 @@ function loadMetadata() {
 
 function defaultCatalog(metadata, fileUrl) {
   const csvFileUrl = new URL('./data/demo.csv', rootUrl).href
+  const jsonFileUrl = new URL('./data/demo-events.json', rootUrl).href
   return {
     format_version: 3,
     schemas: [
@@ -72,6 +73,20 @@ function defaultCatalog(metadata, fileUrl) {
               { name: 'value', type: 'INTEGER', nullable: false },
             ],
             files: [{ uri: csvFileUrl }],
+          },
+          {
+            name: 'events_json',
+            snapshot: 'demo-json-v1',
+            scanner: {
+              type: 'json',
+              options: { format: 'array', records: 'true' },
+            },
+            columns: [
+              { name: 'event_id', type: 'INTEGER', nullable: false },
+              { name: 'context', type: 'STRUCT(browser VARCHAR, tags VARCHAR[])', nullable: true },
+              { name: 'payload', type: 'JSON', nullable: true },
+            ],
+            files: [{ uri: jsonFileUrl }],
           },
         ],
         views: [

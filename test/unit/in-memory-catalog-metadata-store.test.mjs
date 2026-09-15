@@ -340,7 +340,7 @@ describe('InMemoryCatalogMetadataStore', () => {
     )
 
     const unsupported = snapshot()
-    unsupported.schemas[0].tables[0].scanner.type = 'json'
+    unsupported.schemas[0].tables[0].scanner.type = 'yaml'
     await expectCode(
       () => session.replaceCatalogSnapshot(unsupported),
       'RC_SCANNER_UNSUPPORTED',
@@ -382,6 +382,62 @@ describe('InMemoryCatalogMetadataStore', () => {
     }
 
     assert.equal(store.currentRevision('workspace'), 1n)
+  })
+
+  it('accepts json scanner options and recursively nested column types', async () => {
+    const store = new InMemoryCatalogMetadataStore()
+    const session = store.openWorkspaceSession('workspace')
+    const candidate = snapshot()
+    candidate.schemas[0].tables[0].scanner = {
+      type: 'json',
+      options: {
+        format: 'newline_delimited',
+        compression: 'auto_detect',
+        records: 'false',
+        ignore_errors: true,
+        maximum_object_size: 16777216,
+        dateformat: 'iso',
+        timestampformat: 'iso',
+      },
+    }
+    candidate.schemas[0].tables[0].columns = [
+      { name: 'raw', type: 'JSON', nullable: false },
+      { name: 'profile', type: 'STRUCT(name VARCHAR, tags VARCHAR[])', nullable: true },
+      { name: 'events', type: 'LIST(STRUCT(id BIGINT, payload JSON))', nullable: true },
+    ]
+
+    await session.replaceCatalogSnapshot(candidate)
+    assert.deepEqual(
+      store.lookupTable('workspace', '1', 'main', 'table1').columns,
+      candidate.schemas[0].tables[0].columns,
+    )
+  })
+
+  it('rejects unsupported or malformed nested column types and json options', async () => {
+    const store = new InMemoryCatalogMetadataStore()
+    const session = store.openWorkspaceSession('workspace')
+    for (const type of [
+      'MAP(VARCHAR, VARCHAR)',
+      'STRUCT(name VARCHAR',
+      'STRUCT(name VARCHAR, NAME BIGINT)',
+      'LIST(DECIMAL(10, 2))',
+      'struct(name VARCHAR)',
+    ]) {
+      const candidate = snapshot()
+      candidate.schemas[0].tables[0].columns[0].type = type
+      await expectCode(() => session.replaceCatalogSnapshot(candidate), 'RC_METADATA_INVALID')
+    }
+
+    for (const [option, value] of [
+      ['format', 'nd'],
+      ['records', false],
+      ['maximum_object_size', 0],
+      ['sample_size', 100],
+    ]) {
+      const candidate = snapshot()
+      candidate.schemas[0].tables[0].scanner = { type: 'json', options: { [option]: value } }
+      await expectCode(() => session.replaceCatalogSnapshot(candidate), 'RC_METADATA_INVALID')
+    }
   })
 
   it('rejects the previous snapshot format instead of choosing a scanner implicitly', async () => {

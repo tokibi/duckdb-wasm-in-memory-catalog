@@ -1,6 +1,6 @@
 ---
 title: Scanner
-description: Catalog が受け付ける Parquet と CSV scanner の設定方法。
+description: Catalog が受け付ける Parquet、CSV、JSON scanner の設定方法。
 ---
 
 # Scanner
@@ -20,6 +20,20 @@ scanner: {
 
 Catalog は physical Parquet の column 数、順序、名前、型を、公開されている `columns` metadata と照合します。
 
+## Column type
+
+Columnにはreferenceに記載されたscalar typeに加え、再帰的にネストした`JSON`、`STRUCT`、`LIST`を指定できます。
+
+```js
+columns: [
+  { name: 'raw', type: 'JSON', nullable: true },
+  { name: 'profile', type: 'STRUCT(name VARCHAR, tags VARCHAR[])', nullable: true },
+  { name: 'items', type: 'LIST(STRUCT(id BIGINT, payload JSON))', nullable: true },
+]
+```
+
+`STRUCT`のfield名は重複できません。`LIST(type)`と`type[]`は同じ意味です。ネストは32階層までです。
+
 ## CSV
 
 CSV table では DuckDB の `read_csv` scanner を使い、catalog の `columns` metadata を read schema にします。`auto_detect`（既定 `true`）は dialect と header を sniff し、`false` は宣言した dialect を使います。
@@ -34,36 +48,67 @@ scanner: {
 }
 ```
 
-省略した option には DuckDB の既定値が使われます。`Catalog value` は bridge 前の検証、`DuckDB value` は bind 時に DuckDB 1.4 が受け付ける値を示します。
+省略したoptionにはDuckDBの既定値が使われます。
 
 ### CSV options
 
-| Option | Catalog value | DuckDB value | Default | Description |
-| --- | --- | --- | --- | --- |
-| `auto_detect` | `boolean` | `true` / `false` | `true` | dialect と header を sniff。`false` は catalog schema を sniff なしで使用。 |
-| `header` | `boolean` | `true` / `false` | `auto_detect=true` は sniff、それ以外は `false` | 先頭 row を header として扱う。 |
-| `delimiter` | 空でない文字列、NUL なし | 最大4 byte、`\t` は展開 | `,` | Field 区切り。DuckDB `delim` に変換。 |
-| `quote` | 文字列、NUL なし。空可 | 0 または1 byte | `"` | Quote 文字。 |
-| `escape` | 文字列、NUL なし。空可 | 0 または1 byte | DuckDB 既定値 | Escape 文字。 |
-| `comment` | 文字列、NUL なし。空可 | 0 または1 byte | なし | Comment 行の文字。 |
-| `skip` | 0 以上の safe integer | integer `>= 0` | `0` | 読み取り前に skip する row 数。 |
-| `nullstr` | string または string[]、NUL なし | string または string[]、NULL 要素なし | `""` | `NULL` とする値。 |
-| `dateformat` | 空でない文字列、NUL なし | `auto` または `strptime` format | Auto | `DATE` 用 format。 |
-| `timestampformat` | 空でない文字列、NUL なし | `auto` または `strptime` format | Auto | Timestamp 用 format。 |
-| `compression` | 空でない文字列、NUL なし | `auto` / `infer`、`uncompressed` / `none`、`gzip`、`zstd` | Auto-detect | CSV compression。 |
-| `ignore_errors` | `boolean` | `true` / `false` | `false` | Invalid row を無視。 |
-| `null_padding` | `boolean` | `true` / `false` | `false` | 短い row を `NULL` で補完。 |
-| `allow_quoted_nulls` | `boolean` | `true` / `false` | `true` | Quoted null marker を `NULL` にする。 |
-| `buffer_size` | 正の safe integer | integer `> 0`。両方指定時は `max_line_size` 以上 | DuckDB が算出 | Reader buffer size（byte）。 |
-| `decimal_separator` | 空でない文字列、NUL なし | `.` または `,` | `.` | 小数点記号。 |
-| `encoding` | 空でない文字列、NUL なし | Core は `utf-8`、`utf-16`、`latin-1`。拡張で追加可 | `utf-8` | 入力 encoding。 |
-| `force_not_null` | 空でない string[]、NUL なし | Column 名または `*` | なし | 選択 column の null marker を文字列に保持。 |
-| `max_line_size` | 0 以上の safe integer | integer `>= 0` | `2,000,000` byte | 1行の最大 size。 |
-| `new_line` | 空でない文字列、NUL なし | `\n`、`\r`、または `\r\n` | Sniff/既定値 | Record separator。 |
-| `parallel` | `boolean` | `true` / `false` | `true` | 並列 parsing を許可。 |
-| `sample_size` | `-1` または正の safe integer | `-1` または integer `>= 1` | 20,480 row | 検出に使う row 数。`-1` は全体。 |
-| `strict_mode` | `boolean` | `true` / `false` | `true` | Malformed row を拒否。 |
-| `thousands` | 文字列、NUL なし。空可 | 0 または1 byte | なし | Thousands separator。 |
+| Option | 使用できる値 | 既定値 | 説明 |
+| --- | --- | --- | --- |
+| `auto_detect` | `true` / `false` | `true` | 区切り文字やheaderを自動検出します。 |
+| `header` | `true` / `false` | 自動検出時は検出、それ以外は`false` | 先頭行をheaderとして扱います。 |
+| `delimiter` | NULを含まない空でない文字列。最大4 byte。`\t`も指定可能 | `,` | フィールドの区切り文字です。 |
+| `quote` | NULを含まない0〜1 byteの文字列 | `"` | 引用符です。 |
+| `escape` | NULを含まない0〜1 byteの文字列 | DuckDBの既定値 | エスケープ文字です。 |
+| `comment` | NULを含まない0〜1 byteの文字列 | なし | コメント行を示す文字です。 |
+| `skip` | 0以上のsafe integer | `0` | 読み取り前に無視する行数です。 |
+| `nullstr` | NULを含まない文字列、またはその配列 | `""` | `NULL`として読み取る値です。 |
+| `dateformat` | `auto`、またはNULを含まない`strptime`形式の文字列 | 自動 | `DATE`の形式です。 |
+| `timestampformat` | `auto`、またはNULを含まない`strptime`形式の文字列 | 自動 | timestampの形式です。 |
+| `compression` | `auto` / `infer`、`uncompressed` / `none`、`gzip`、`zstd` | 自動検出 | 圧縮形式です。 |
+| `ignore_errors` | `true` / `false` | `false` | 不正な行を無視します。 |
+| `null_padding` | `true` / `false` | `false` | 値が不足している行を`NULL`で補完します。 |
+| `allow_quoted_nulls` | `true` / `false` | `true` | 引用符で囲まれたnull markerを`NULL`として扱います。 |
+| `buffer_size` | 正のsafe integer。`max_line_size`も指定する場合はその値以上 | DuckDBが算出 | 読み取りbufferのbyte数です。 |
+| `decimal_separator` | `.`または`,` | `.` | 小数点記号です。 |
+| `encoding` | `utf-8`、`utf-16`、`latin-1`。extensionにより追加可能 | `utf-8` | 入力encodingです。 |
+| `force_not_null` | 空でないcolumn名または`*`の配列。NUL不可 | なし | 指定したcolumnではnull markerを文字列として保持します。 |
+| `max_line_size` | 0以上のsafe integer | `2,000,000` byte | 1行の最大byte数です。 |
+| `new_line` | `\n`、`\r`、`\r\n` | 自動検出 | 改行文字です。 |
+| `parallel` | `true` / `false` | `true` | 並列読み取りを有効にします。 |
+| `sample_size` | `-1`、または正のsafe integer | `20,480`行 | 自動検出に使う行数です。`-1`は全行を表します。 |
+| `strict_mode` | `true` / `false` | `true` | 不正なCSVをエラーにします。 |
+| `thousands` | NULを含まない0〜1 byteの文字列 | なし | 桁区切り文字です。 |
 
 - Schema option（`columns`、`names`、`types`、`column_types`、`auto_type_candidates`）は catalog の `columns` metadata で指定します。`all_varchar` と `normalize_names` は受け付けません。
 - 仮想/partition、reject 出力、`union_by_name`、file sniffing 制御、DuckDB alias、COPY 専用 option は未対応です。
+
+## JSON
+
+JSON tableではDuckDBの`read_json` scannerを使い、catalogの`columns` metadataをread schemaにします。
+
+```js
+scanner: {
+  type: 'json',
+  options: {
+    format: 'newline_delimited',
+    records: 'true',
+  },
+}
+```
+
+省略したoptionにはDuckDBの既定値が使われます。
+
+### JSON options
+
+| Option | 使用できる値 | 既定値 | 説明 |
+| --- | --- | --- | --- |
+| `format` | `auto`、`array`、`newline_delimited`、`unstructured` | `auto` | JSONの配置形式です。 |
+| `compression` | `auto_detect`、`uncompressed`、`gzip`、`zstd` | 自動検出 | 圧縮形式です。 |
+| `records` | 文字列の`auto`、`true`、`false` | `auto` | objectを行として読み取るか指定します。`false`ではcolumnを1つだけ定義します。 |
+| `ignore_errors` | `true` / `false`。`newline_delimited`の場合のみ指定可能 | `false` | 不正なrecordを無視します。 |
+| `maximum_object_size` | 1〜`4,294,967,295`のsafe integer | `16,777,216` byte | JSON objectの最大byte数です。 |
+| `dateformat` | `iso`、またはNULを含まない`strptime`形式の文字列 | `iso` | `DATE`の形式です。 |
+| `timestampformat` | `iso`、またはNULを含まない`strptime`形式の文字列 | `iso` | timestampの形式です。 |
+
+- `columns`はcatalog metadataから渡します。Schema推論用optionは受け付けません。
+- 仮想/partition column、`union_by_name`、alias、COPY専用optionは未対応です。

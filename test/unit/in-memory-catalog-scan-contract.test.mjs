@@ -23,4 +23,12 @@ describe('In-Memory Catalog schema scan contract', () => {
       /if \(type == CatalogType::TABLE_ENTRY\) \{[\s\S]*ListQueryVisibleTables\(workspace, \*revision, schema_name\)[\s\S]*if \(context\) \{[\s\S]*ListQueryVisibleViews\(workspace, \*revision, schema_name\)[\s\S]*\}\s*\} else if \(type == CatalogType::VIEW_ENTRY && context\) \{[\s\S]*ListQueryVisibleViews\(workspace, \*revision, schema_name\)/,
     )
   })
+
+  it('binds JSON through the loaded public table function without linking JSON internals', () => {
+    assert.match(extensionSource, /scanner\.type == "json" \? "read_json"/)
+    assert.match(extensionSource, /if \(scanner\.type == "json"\)[\s\S]*function\.bind\(context, input/)
+    assert.match(extensionSource, /RC_JSON_SCHEMA_MISMATCH/)
+    assert.doesNotMatch(extensionSource, /json_multi_file_info\.hpp/)
+    assert.doesNotMatch(extensionSource, /JSONMultiFileInfo/)
+  })
 })
