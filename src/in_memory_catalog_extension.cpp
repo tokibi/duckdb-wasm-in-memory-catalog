@@ -935,7 +935,17 @@ private:
 			for (const auto &descriptor : ListQueryVisibleTables(workspace, *revision, schema_name)) {
 				callback(*GetEnumerationEntry(descriptor, *revision));
 			}
-		} else if (context) {
+			// DuckDB stores tables and views in the same catalog set. A
+			// context-aware TABLE_ENTRY scan therefore includes both kinds of
+			// entries; callers filter by the concrete CatalogType. The
+			// context-free overload cannot bind view definitions, so it keeps
+			// returning tables only.
+			if (context) {
+				for (const auto &descriptor : ListQueryVisibleViews(workspace, *revision, schema_name)) {
+					callback(*GetEnumerationViewEntry(*context, descriptor, *revision));
+				}
+			}
+		} else if (type == CatalogType::VIEW_ENTRY && context) {
 			for (const auto &descriptor : ListQueryVisibleViews(workspace, *revision, schema_name)) {
 				callback(*GetEnumerationViewEntry(*context, descriptor, *revision));
 			}
