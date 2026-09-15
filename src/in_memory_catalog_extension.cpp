@@ -21,6 +21,7 @@
 #include "duckdb/parser/parsed_data/create_schema_info.hpp"
 #include "duckdb/parser/parsed_data/create_table_info.hpp"
 #include "duckdb/parser/parsed_data/create_view_info.hpp"
+#include "duckdb/parser/tableref/table_function_ref.hpp"
 #include "duckdb/parser/constraints/not_null_constraint.hpp"
 #include "duckdb/storage/database_size.hpp"
 #include "duckdb/storage/storage_extension.hpp"
@@ -245,7 +246,7 @@ static bool IsCSVScannerEmptyStringOption(const string &key) {
 	return key == "quote" || key == "escape" || key == "comment" || key == "thousands";
 }
 
-static Value DecodeScannerOption(const string &key, yyjson_val *value) {
+static Value DecodeCSVScannerOption(const string &key, yyjson_val *value) {
 	if (!IsSupportedCSVScannerOption(key)) {
 		DescriptorInvalid();
 	}
@@ -320,13 +321,58 @@ static Value DecodeScannerOption(const string &key, yyjson_val *value) {
 	DescriptorInvalid();
 }
 
+static bool IsSupportedJSONScannerOption(const string &key) {
+	static const unordered_set<string> supported_options {"format",         "compression", "records",
+	                                                      "ignore_errors",  "maximum_object_size",
+	                                                      "dateformat",     "timestampformat"};
+	return supported_options.find(key) != supported_options.end();
+}
+
+static Value DecodeJSONScannerOption(const string &key, yyjson_val *value) {
+	if (!IsSupportedJSONScannerOption(key)) {
+		DescriptorInvalid();
+	}
+	if (key == "ignore_errors") {
+		if (!yyjson_is_bool(value)) {
+			DescriptorInvalid();
+		}
+		return Value::BOOLEAN(yyjson_get_bool(value));
+	}
+	if (key == "maximum_object_size") {
+		if (!yyjson_is_uint(value)) {
+			DescriptorInvalid();
+		}
+		auto number = yyjson_get_uint(value);
+		if (number == 0 || number > NumericLimits<uint32_t>::Maximum()) {
+			DescriptorInvalid();
+		}
+		return Value::UINTEGER(static_cast<uint32_t>(number));
+	}
+	if (!yyjson_is_str(value)) {
+		DescriptorInvalid();
+	}
+	string result(unsafe_yyjson_get_str(value), unsafe_yyjson_get_len(value));
+	if (result.empty() || result.find('\0') != string::npos) {
+		DescriptorInvalid();
+	}
+	if (key == "format" && result != "auto" && result != "array" && result != "newline_delimited" &&
+	    result != "unstructured") {
+		DescriptorInvalid();
+	}
+	if (key == "records" && result != "auto" && result != "true" && result != "false") {
+		DescriptorInvalid();
+	}
+	return Value(std::move(result));
+}
+
 static void DecodeScanner(yyjson_val *object, CatalogTableDescriptor &descriptor) {
 	auto scanner = yyjson_obj_get(object, "scanner");
 	if (!scanner || !yyjson_is_obj(scanner) || yyjson_obj_size(scanner) != 2) {
 		DescriptorInvalid();
 	}
 	descriptor.scanner.type = JSONString(scanner, "type");
-	if (descriptor.scanner.type != "parquet" && descriptor.scanner.type != "csv") {
+	if (descriptor.scanner.type != "parquet" && descriptor.scanner.type != "csv" &&
+	    descriptor.scanner.type != "json") {
 		DescriptorInvalid();
 	}
 	auto options = yyjson_obj_get(scanner, "options");
@@ -336,13 +382,17 @@ static void DecodeScanner(yyjson_val *object, CatalogTableDescriptor &descriptor
 	if (descriptor.scanner.type == "parquet" && yyjson_obj_size(options) != 0) {
 		DescriptorInvalid();
 	}
-	if (descriptor.scanner.type == "csv") {
+	if (descriptor.scanner.type == "csv" || descriptor.scanner.type == "json") {
 		size_t index, count;
 		yyjson_val *key, *option_value;
 		yyjson_obj_foreach(options, index, count, key, option_value) {
 			auto option_name = string(unsafe_yyjson_get_str(key), unsafe_yyjson_get_len(key));
-			descriptor.scanner.options.emplace(CSVScannerOptionName(option_name),
-			                                  DecodeScannerOption(option_name, option_value));
+			if (descriptor.scanner.type == "csv") {
+				descriptor.scanner.options.emplace(CSVScannerOptionName(option_name),
+				                                  DecodeCSVScannerOption(option_name, option_value));
+			} else {
+				descriptor.scanner.options.emplace(option_name, DecodeJSONScannerOption(option_name, option_value));
+			}
 		}
 	}
 }
@@ -368,12 +418,57 @@ static uint64_t ParseCatalogRevision(const string &value) {
 	}
 }
 
-static bool IsSupportedLogicalType(const string &type) {
-	static const unordered_set<string> supported_types {
-	    "BOOLEAN",   "TINYINT",  "SMALLINT", "INTEGER",   "BIGINT",    "UTINYINT", "USMALLINT",
-	    "UINTEGER",  "UBIGINT",  "FLOAT",    "DOUBLE",    "VARCHAR",   "DATE",     "TIMESTAMP",
-	    "TIMESTAMP_TZ"};
-	return supported_types.find(type) != supported_types.end();
+static bool IsSupportedPrimitiveLogicalType(const LogicalType &type) {
+	switch (type.id()) {
+	case LogicalTypeId::BOOLEAN:
+	case LogicalTypeId::TINYINT:
+	case LogicalTypeId::SMALLINT:
+	case LogicalTypeId::INTEGER:
+	case LogicalTypeId::BIGINT:
+	case LogicalTypeId::UTINYINT:
+	case LogicalTypeId::USMALLINT:
+	case LogicalTypeId::UINTEGER:
+	case LogicalTypeId::UBIGINT:
+	case LogicalTypeId::FLOAT:
+	case LogicalTypeId::DOUBLE:
+	case LogicalTypeId::VARCHAR:
+	case LogicalTypeId::DATE:
+	case LogicalTypeId::TIMESTAMP:
+	case LogicalTypeId::TIMESTAMP_TZ:
+		return !type.HasAlias();
+	default:
+		return false;
+	}
+}
+
+static LogicalType NormalizeSupportedLogicalType(const LogicalType &type, idx_t depth = 0) {
+	if (depth > 32) {
+		DescriptorInvalid();
+	}
+	if (type.id() == LogicalTypeId::USER && type.HasAlias() && StringUtil::CIEquals(type.GetAlias(), "JSON")) {
+		return LogicalType::JSON();
+	}
+	if (IsSupportedPrimitiveLogicalType(type)) {
+		return type;
+	}
+	if (type.id() == LogicalTypeId::LIST) {
+		return LogicalType::LIST(NormalizeSupportedLogicalType(ListType::GetChildType(type), depth + 1));
+	}
+	if (type.id() == LogicalTypeId::STRUCT) {
+		child_list_t<LogicalType> children;
+		unordered_set<string> names;
+		for (const auto &child : StructType::GetChildTypes(type)) {
+			if (child.first.empty() || !names.insert(StringUtil::Lower(child.first)).second) {
+				DescriptorInvalid();
+			}
+			children.emplace_back(child.first, NormalizeSupportedLogicalType(child.second, depth + 1));
+		}
+		if (children.empty()) {
+			DescriptorInvalid();
+		}
+		return LogicalType::STRUCT(std::move(children));
+	}
+	DescriptorInvalid();
 }
 
 static void DecodeColumns(yyjson_val *object, CatalogTableDescriptor &descriptor) {
@@ -391,13 +486,19 @@ static void DecodeColumns(yyjson_val *object, CatalogTableDescriptor &descriptor
 		auto name = JSONString(column, "name");
 		auto type_name = JSONString(column, "type");
 		auto nullable = yyjson_obj_get(column, "nullable");
-		if (name.empty() || name.find('\0') != string::npos ||
-		    !column_names.insert(StringUtil::Lower(name)).second ||
-		    !IsSupportedLogicalType(type_name) || !nullable || !yyjson_is_bool(nullable)) {
+		if (name.empty() || name.find('\0') != string::npos || type_name.empty() || type_name.size() > 4096 ||
+		    type_name.find('\0') != string::npos || !column_names.insert(StringUtil::Lower(name)).second || !nullable ||
+		    !yyjson_is_bool(nullable)) {
 			DescriptorInvalid();
 		}
-		descriptor.columns.push_back(
-		    {std::move(name), TransformStringToLogicalType(type_name), yyjson_get_bool(nullable)});
+		try {
+			auto type = NormalizeSupportedLogicalType(TransformStringToLogicalType(type_name));
+			descriptor.columns.push_back({std::move(name), std::move(type), yyjson_get_bool(nullable)});
+		} catch (const Exception &) {
+			DescriptorInvalid();
+		} catch (const std::exception &) {
+			DescriptorInvalid();
+		}
 	}
 }
 
@@ -909,7 +1010,8 @@ public:
 
 	TableFunction GetScanFunction(ClientContext &context, unique_ptr<FunctionData> &bind_data) override {
 		const auto &scanner = descriptor->scanner;
-		const auto scanner_name = scanner.type == "csv" ? "read_csv" : "parquet_scan";
+		const auto scanner_name =
+		    scanner.type == "csv" ? "read_csv" : scanner.type == "json" ? "read_json" : "parquet_scan";
 		auto &entry = Catalog::GetSystemCatalog(context).GetEntry<TableFunctionCatalogEntry>(context, DEFAULT_SCHEMA,
 		                                                                                     scanner_name);
 		auto function = entry.functions.GetFunctionByArguments(context, {LogicalType::LIST(LogicalType::VARCHAR)});
@@ -938,9 +1040,7 @@ public:
 			named_parameters["schema"] =
 			    Value::MAP(LogicalType::VARCHAR, schema_struct_type, std::move(schema_keys), std::move(schema_values));
 		} else {
-			// read_csv uses the Catalog schema as its explicit columns definition.
-			// With auto-detection enabled (the default), DuckDB still validates the
-			// header and dialect while using these names and types as the contract.
+			// Text scanners use the Catalog schema as their explicit columns definition.
 			child_list_t<Value> column_definitions;
 			column_definitions.reserve(descriptor->columns.size());
 			for (const auto &column : descriptor->columns) {
@@ -950,6 +1050,31 @@ public:
 			for (const auto &option : scanner.options) {
 				named_parameters[option.first] = option.second;
 			}
+		}
+
+		if (scanner.type == "json") {
+			vector<Value> inputs;
+			inputs.push_back(Value::LIST(LogicalType::VARCHAR, files));
+			vector<LogicalType> input_table_types;
+			vector<string> input_table_names;
+			vector<LogicalType> return_types;
+			vector<string> return_names;
+			TableFunctionRef ref;
+			TableFunctionBindInput input(inputs, named_parameters, input_table_types, input_table_names,
+			                             function.function_info.get(), nullptr, function, ref);
+			bind_data = function.bind(context, input, return_types, return_names);
+			if (return_names.size() != descriptor->columns.size()) {
+				throw InvalidInputException(
+				    "RC_JSON_SCHEMA_MISMATCH: physical column count does not match Catalog metadata");
+			}
+			for (idx_t index = 0; index < descriptor->columns.size(); index++) {
+				const auto &column = descriptor->columns[index];
+				if (return_names[index] != column.name || return_types[index] != column.type) {
+					throw InvalidInputException(
+					    "RC_JSON_SCHEMA_MISMATCH: physical column order, name, or type does not match Catalog metadata");
+				}
+			}
+			return function;
 		}
 
 		vector<OpenFileInfo> open_files;

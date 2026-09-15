@@ -17,6 +17,9 @@ describe('GitHub Pages demo view examples', () => {
     assert.match(appSource, /FROM demo\.analytics\.nation_counts_by_region;/)
     assert.match(appSource, /type: 'csv'/)
     assert.match(appSource, /name: 'events_csv'/)
+    assert.match(appSource, /type: 'json'/)
+    assert.match(appSource, /name: 'events_json'/)
+    assert.match(appSource, /STRUCT\(browser VARCHAR, tags VARCHAR\[\]\)/)
   })
 
   it('provides view metadata and view query examples', () => {
@@ -27,5 +30,7 @@ describe('GitHub Pages demo view examples', () => {
     assert.match(pageSource, /data-query-example="viewRows"/)
     assert.match(examplesSource, /examples\.csvRows/)
     assert.match(pageSource, /data-query-example="csvRows"/)
+    assert.match(examplesSource, /examples\.jsonRows/)
+    assert.match(pageSource, /data-query-example="jsonRows"/)
   })
 })

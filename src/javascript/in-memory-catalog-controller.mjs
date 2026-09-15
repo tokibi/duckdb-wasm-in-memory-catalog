@@ -42,6 +42,7 @@ export class InMemoryCatalogController {
   #attached = false
   #state = 'active'
   #recoveryReported = false
+  #jsonLoaded = false
 
   static async initialize(db, worker, options, initialSnapshot) {
     const normalized = normalizeOptions(options)
@@ -117,6 +118,7 @@ export class InMemoryCatalogController {
       ))
     }
     const operation = this.#pending.then(async () => {
+      await this.#ensureJSONExtension(submittedSnapshot)
       const result = await this.#session.request(
         'IN_MEMORY_CATALOG_REPLACE_SNAPSHOT',
         'IN_MEMORY_CATALOG_REPLACE_SNAPSHOT_RESULT',
@@ -151,6 +153,7 @@ export class InMemoryCatalogController {
       ))
     }
     const operation = this.#pending.then(async () => {
+      await this.#ensureJSONExtension(submittedTable)
       const result = await this.#session.request(
         'IN_MEMORY_CATALOG_REPLACE_TABLE',
         'IN_MEMORY_CATALOG_REPLACE_TABLE_RESULT',
@@ -271,6 +274,23 @@ export class InMemoryCatalogController {
       // Recovery is already required; observer failures must not replace that result.
     }
   }
+
+  async #ensureJSONExtension(metadata) {
+    if (this.#jsonLoaded || !usesJSONExtension(metadata)) return
+    await this.#connection.query('LOAD json')
+    this.#jsonLoaded = true
+  }
+}
+
+function usesJSONExtension(metadata) {
+  const tables = Array.isArray(metadata?.schemas)
+    ? metadata.schemas.flatMap((schema) => Array.isArray(schema?.tables) ? schema.tables : [])
+    : [metadata]
+  return tables.some((table) =>
+    table?.scanner?.type === 'json' ||
+    (Array.isArray(table?.columns) && table.columns.some((column) =>
+      typeof column?.type === 'string' && /(^|[^A-Za-z0-9_$])JSON([^A-Za-z0-9_$]|$)/u.test(column.type))),
+  )
 }
 
 class WorkspaceSessionClient {

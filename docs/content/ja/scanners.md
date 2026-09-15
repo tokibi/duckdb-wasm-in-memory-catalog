@@ -1,6 +1,6 @@
 ---
 title: Scanner
-description: Catalog が受け付ける Parquet と CSV scanner の設定方法。
+description: Catalog が受け付ける Parquet、CSV、JSON scanner の設定方法。
 ---
 
 # Scanner
@@ -19,6 +19,20 @@ scanner: {
 ```
 
 Catalog は physical Parquet の column 数、順序、名前、型を、公開されている `columns` metadata と照合します。
+
+## Column type
+
+Columnにはreferenceに記載されたscalar typeに加え、再帰的にネストした`JSON`、`STRUCT`、`LIST`を指定できます。
+
+```js
+columns: [
+  { name: 'raw', type: 'JSON', nullable: true },
+  { name: 'profile', type: 'STRUCT(name VARCHAR, tags VARCHAR[])', nullable: true },
+  { name: 'items', type: 'LIST(STRUCT(id BIGINT, payload JSON))', nullable: true },
+]
+```
+
+`STRUCT`のfield名は重複できません。`LIST(type)`と`type[]`は同じ意味です。ネストは32階層までです。
 
 ## CSV
 
@@ -67,3 +81,34 @@ scanner: {
 
 - Schema option（`columns`、`names`、`types`、`column_types`、`auto_type_candidates`）は catalog の `columns` metadata で指定します。`all_varchar` と `normalize_names` は受け付けません。
 - 仮想/partition、reject 出力、`union_by_name`、file sniffing 制御、DuckDB alias、COPY 専用 option は未対応です。
+
+## JSON
+
+JSON tableではDuckDBの`read_json` scannerを使い、catalogの`columns` metadataをread schemaにします。
+
+```js
+scanner: {
+  type: 'json',
+  options: {
+    format: 'newline_delimited',
+    records: 'true',
+  },
+}
+```
+
+省略したoptionにはDuckDBの既定値が使われます。
+
+### JSON options
+
+| Option | Catalog value | DuckDB value | Default | Description |
+| --- | --- | --- | --- | --- |
+| `format` | `auto`、`array`、`newline_delimited`、`unstructured` | 同左。DuckDBは`nd` aliasも受付 | `auto` | JSON documentの配置形式。 |
+| `compression` | 空でない文字列、NULなし | `auto_detect`、`uncompressed`、`gzip`、`zstd` | Auto-detect | Input compression。 |
+| `records` | 文字列の`auto`、`true`、`false` | 同左 | `auto` | Objectをrowとして読む。`false`ではcatalog columnが1つ必要。 |
+| `ignore_errors` | `boolean` | `true` / `false`。newline-delimited JSONのみ | `false` | Malformed recordを無視。 |
+| `maximum_object_size` | `4,294,967,295`以下の正のsafe integer | 正の`UINTEGER` | `16,777,216` byte | JSON objectの最大size。 |
+| `dateformat` | 空でない文字列、NULなし | `iso`または`strptime` format | ISO | `DATE`用format。 |
+| `timestampformat` | 空でない文字列、NULなし | `iso`または`strptime` format | ISO | Timestamp用format。 |
+
+- `columns`はcatalog metadataから渡します。Schema推論用optionは受け付けません。
+- 仮想/partition column、`union_by_name`、alias、COPY専用optionは未対応です。

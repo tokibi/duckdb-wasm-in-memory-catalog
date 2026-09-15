@@ -169,6 +169,53 @@ describe('InMemoryCatalogController', () => {
     assert.equal(queries[1], "LOAD '/extensions/in_memory_catalog.duckdb_extension.wasm'")
   })
 
+  it('loads json once before publishing a json scanner introduced later', async () => {
+    const store = new InMemoryCatalogMetadataStore()
+    const worker = runtimeWorker(createInMemoryCatalogWorkerRuntime(store))
+    const { db, queries } = fakeDatabase()
+    const controller = await InMemoryCatalogController.initialize(
+      db, worker, { workspaceId: 'workspace', catalogName: 'dataset', ackTimeoutMs: 100 }, snapshot(),
+    )
+    try {
+      const jsonSnapshot = snapshot('https://example.test/table.json')
+      jsonSnapshot.schemas[0].tables[0].scanner = {
+        type: 'json', options: { format: 'array', records: 'true' },
+      }
+      jsonSnapshot.schemas[0].tables[0].columns = [
+        { name: 'payload', type: 'STRUCT(id BIGINT, tags VARCHAR[])', nullable: true },
+      ]
+      await controller.publishSnapshot(jsonSnapshot)
+
+      const replacement = structuredClone(jsonSnapshot.schemas[0].tables[0])
+      replacement.columns = [{ name: 'payload', type: 'JSON', nullable: true }]
+      await controller.replaceTable('main', replacement)
+
+      assert.equal(queries.filter((query) => query === 'LOAD json').length, 1)
+      assert.ok(queries.indexOf('LOAD json') > queries.indexOf(
+        'ATTACH \'workspace\' AS "dataset" (TYPE in_memory_catalog, READ_ONLY)',
+      ))
+    } finally {
+      await controller.close()
+    }
+  })
+
+  it('loads json for a JSON column even when the scanner is parquet', async () => {
+    const store = new InMemoryCatalogMetadataStore()
+    const worker = runtimeWorker(createInMemoryCatalogWorkerRuntime(store))
+    const { db, queries } = fakeDatabase()
+    const initial = snapshot()
+    initial.schemas[0].tables[0].columns = [{ name: 'payload', type: 'JSON', nullable: true }]
+    const controller = await InMemoryCatalogController.initialize(
+      db, worker, { workspaceId: 'workspace', catalogName: 'dataset', ackTimeoutMs: 100 }, initial,
+    )
+
+    await controller.close()
+    assert.equal(queries.filter((query) => query === 'LOAD json').length, 1)
+    assert.ok(queries.indexOf('LOAD json') < queries.indexOf(
+      'ATTACH \'workspace\' AS "dataset" (TYPE in_memory_catalog, READ_ONLY)',
+    ))
+  })
+
   it('rejects ambiguous extension configuration', async () => {
     const { db } = fakeDatabase()
     await assert.rejects(

@@ -1,6 +1,6 @@
 ---
 title: Scanners
-description: Configure the Parquet and CSV scanners accepted by the catalog.
+description: Configure the Parquet, CSV, and JSON scanners accepted by the catalog.
 ---
 
 # Scanners
@@ -19,6 +19,20 @@ scanner: {
 ```
 
 The catalog checks the physical Parquet column count, order, names, and types against the published `columns` metadata.
+
+## Column types
+
+Columns accept the scalar types listed in the reference, plus recursively nested `JSON`, `STRUCT`, and `LIST` types.
+
+```js
+columns: [
+  { name: 'raw', type: 'JSON', nullable: true },
+  { name: 'profile', type: 'STRUCT(name VARCHAR, tags VARCHAR[])', nullable: true },
+  { name: 'items', type: 'LIST(STRUCT(id BIGINT, payload JSON))', nullable: true },
+]
+```
+
+`STRUCT` fields must have unique names. `LIST(type)` and `type[]` are equivalent. Nesting is limited to 32 levels.
 
 ## CSV
 
@@ -67,3 +81,34 @@ If an option is omitted, DuckDB's default is used. `Catalog value` describes val
 
 - Schema options (`columns`, `names`, `types`, `column_types`, `auto_type_candidates`) come from the catalog `columns` metadata. `all_varchar` and `normalize_names` are not accepted.
 - Virtual/partition options, reject-output options, `union_by_name`, file-sniffing controls, DuckDB aliases, and COPY-only options are not supported.
+
+## JSON
+
+JSON tables use DuckDB's `read_json` scanner with the catalog's `columns` metadata as the read schema.
+
+```js
+scanner: {
+  type: 'json',
+  options: {
+    format: 'newline_delimited',
+    records: 'true',
+  },
+}
+```
+
+If an option is omitted, DuckDB's default is used.
+
+### JSON options
+
+| Option | Catalog value | DuckDB value | Default | Description |
+| --- | --- | --- | --- | --- |
+| `format` | `auto`, `array`, `newline_delimited`, or `unstructured` | Same; DuckDB also accepts the `nd` alias | `auto` | JSON document layout. |
+| `compression` | Non-empty string, no NUL | `auto_detect`, `uncompressed`, `gzip`, or `zstd` | Auto-detect | Input compression. |
+| `records` | `auto`, `true`, or `false` as a string | Same | `auto` | Read objects as rows; `false` requires exactly one catalog column. |
+| `ignore_errors` | `boolean` | `true` / `false`; only valid for newline-delimited JSON | `false` | Skip malformed records. |
+| `maximum_object_size` | Positive safe integer, at most `4,294,967,295` | Positive `UINTEGER` | `16,777,216` bytes | Maximum JSON object size. |
+| `dateformat` | Non-empty string, no NUL | `iso` or a `strptime` format | ISO | Format for `DATE` values. |
+| `timestampformat` | Non-empty string, no NUL | `iso` or a `strptime` format | ISO | Format for timestamp values. |
+
+- `columns` is supplied by the catalog metadata. Schema-inference options are not accepted.
+- Virtual/partition columns, `union_by_name`, aliases, and COPY-only options are not supported.
