@@ -39,6 +39,9 @@ const csvOptions = [
 
 describe('Scanner documentation', () => {
   it('documents every CSV option accepted by the metadata store in both locales', () => {
+    const optionsHeader = /\| Option \| Catalog value \| DuckDB value \| Default \| Description \|/
+    assert.match(english, optionsHeader)
+    assert.match(japanese, optionsHeader)
     for (const option of csvOptions) {
       assert.match(metadataSource, new RegExp(`\\b${option}:`))
       assert.match(nativeSource, new RegExp('"' + option + '"'))
@@ -64,9 +67,9 @@ describe('Scanner documentation', () => {
     assert.match(viteConfig, /link: '\/scanners\.md'/)
   })
 
-  it('keeps native positive integer validation aligned with the public contract', () => {
+  it('keeps native numeric validation aligned with the public contract', () => {
     const zeroChecks = nativeSource.match(
-      /\(\(key == "buffer_size" \|\| key == "max_line_size"\) && number == 0\)/g,
+      /\(key == "buffer_size" && number == 0\)/g,
     ) ?? []
     assert.equal(zeroChecks.length, 2)
   })

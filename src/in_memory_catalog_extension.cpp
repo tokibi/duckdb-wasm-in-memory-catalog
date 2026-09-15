@@ -241,6 +241,10 @@ static bool IsCSVScannerStringArrayOption(const string &key) {
 	return key == "force_not_null" || key == "nullstr";
 }
 
+static bool IsCSVScannerEmptyStringOption(const string &key) {
+	return key == "quote" || key == "escape" || key == "comment" || key == "thousands";
+}
+
 static Value DecodeScannerOption(const string &key, yyjson_val *value) {
 	if (!IsSupportedCSVScannerOption(key)) {
 		DescriptorInvalid();
@@ -265,7 +269,7 @@ static Value DecodeScannerOption(const string &key, yyjson_val *value) {
 	}
 	if (yyjson_is_str(value)) {
 		string result(unsafe_yyjson_get_str(value), unsafe_yyjson_get_len(value));
-		if ((key != "nullstr" && result.empty()) || result.find('\0') != string::npos) {
+		if (result.empty() && key != "nullstr" && !IsCSVScannerEmptyStringOption(key)) {
 			DescriptorInvalid();
 		}
 		return Value(std::move(result));
@@ -273,7 +277,7 @@ static Value DecodeScannerOption(const string &key, yyjson_val *value) {
 	if (yyjson_is_sint(value)) {
 		const auto number = yyjson_get_sint(value);
 		if ((key != "sample_size" && number < 0) || (key == "sample_size" && (number < 1 && number != -1)) ||
-		    ((key == "buffer_size" || key == "max_line_size") && number == 0)) {
+		    (key == "buffer_size" && number == 0)) {
 			DescriptorInvalid();
 		}
 		if (key == "buffer_size") {
@@ -286,7 +290,7 @@ static Value DecodeScannerOption(const string &key, yyjson_val *value) {
 		if (number > NumericLimits<int64_t>::Maximum()) {
 			DescriptorInvalid();
 		}
-		if ((key == "buffer_size" || key == "max_line_size") && number == 0) {
+		if (key == "buffer_size" && number == 0) {
 			DescriptorInvalid();
 		}
 		if (key == "buffer_size") {

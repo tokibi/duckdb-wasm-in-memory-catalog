@@ -315,6 +315,9 @@ describe('InMemoryCatalogMetadataStore', () => {
       options: {
         delimiter: '\t',
         header: true,
+        quote: '',
+        escape: '',
+        comment: '',
         skip: 1,
         nullstr: ['', 'NULL'],
         allow_quoted_nulls: false,
@@ -322,12 +325,12 @@ describe('InMemoryCatalogMetadataStore', () => {
         decimal_separator: ',',
         encoding: 'utf-8',
         force_not_null: ['id'],
-        max_line_size: 2000000,
+        max_line_size: 0,
         new_line: '\\n',
         parallel: false,
         sample_size: -1,
         strict_mode: true,
-        thousands: '_',
+        thousands: '',
       },
     }
     await session.replaceCatalogSnapshot(supportedCsv)
@@ -367,7 +370,7 @@ describe('InMemoryCatalogMetadataStore', () => {
       ['sample_size', 0],
       ['sample_size', -2],
       ['buffer_size', 0],
-      ['max_line_size', 0],
+      ['max_line_size', -1],
     ]) {
       const invalidTypes = snapshot()
       invalidTypes.schemas[0].tables[0].scanner.type = 'csv'

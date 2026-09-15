@@ -14,9 +14,9 @@
     auto_detect: 'boolean',
     header: 'boolean',
     delimiter: 'string',
-    quote: 'string',
-    escape: 'string',
-    comment: 'string',
+    quote: 'string_allow_empty',
+    escape: 'string_allow_empty',
+    comment: 'string_allow_empty',
     skip: 'nonnegative_integer',
     nullstr: 'string_or_string_array',
     dateformat: 'string',
@@ -29,12 +29,12 @@
     decimal_separator: 'string',
     encoding: 'string',
     force_not_null: 'string_array',
-    max_line_size: 'positive_integer',
+    max_line_size: 'nonnegative_integer',
     new_line: 'string',
     parallel: 'boolean',
     sample_size: 'integer',
     strict_mode: 'boolean',
-    thousands: 'string',
+    thousands: 'string_allow_empty',
   })
   const DECIMAL_REVISION_PATTERN = /^(0|[1-9][0-9]*)$/
   const MAX_UINT64 = (1n << 64n) - 1n
@@ -507,6 +507,10 @@
       if (expectedType === 'string' &&
           (typeof value !== 'string' || value.length === 0 || value.includes('\0'))) {
         invalid(`${path}.options.${key} must be a non-empty string without NUL`)
+      }
+      if (expectedType === 'string_allow_empty' &&
+          (typeof value !== 'string' || value.includes('\0'))) {
+        invalid(`${path}.options.${key} must be a string without NUL`)
       }
       if (expectedType === 'string_array' &&
           (!Array.isArray(value) || value.length === 0 || value.some((item) =>
