@@ -74,7 +74,7 @@ Catalog publication では catalog 全体の complete snapshot を送ります�
 }
 ```
 
-Physical file schemaはpublished columnの数、順序、名前、および互換性のあるDuckDB typeと一致する必要があります。Parquetではmetadataを直接検証し、CSVとJSONではpublished columnをread schemaとして使い、bindとscanの際に値を検証します。対応typeとscanner optionは[Scanner](/ja/scanners.md)を参照してください。
+ファイルの列は公開した列定義と一致する必要があります。Parquetではメタデータを直接検証し、CSVとJSONでは公開した列を読み取り定義として使います。XLSXでは検出した列名を照合し、値を公開した型へ変換します。対応する型とscanner optionは[Scanner](/ja/scanners.md)を参照してください。
 
 ### Scanner
 
@@ -124,7 +124,7 @@ const catalog = await InMemoryCatalogController.initialize(
 )
 ```
 
-DuckDB connectionを作成し、Parquetとcatalog extensionをロードし、Worker-side workspace sessionを開き、initial snapshotをpublishしてcatalogをread-onlyでattachします。JSON scannerまたは`JSON` columnを使う最初のpublicationの前にJSON extensionをロードします。
+DuckDB connectionを作成し、Parquetとcatalog extensionをロードし、Worker側のworkspace sessionを開き、最初のsnapshotを公開してcatalogを読み取り専用でattachします。JSON scannerまたは`JSON`型を初めて公開する前にはJSON extensionを、XLSX scannerを初めて公開する前にはExcel extensionをロードします。
 
 `options`:
 
@@ -215,7 +215,7 @@ Controller failure は `InMemoryCatalogControllerError` として throw され�
 
 Snapshot validation では Worker / extension から追加の catalog-specific code が返ることがあります。分岐には error code を使い、message は診断情報として扱ってください。
 
-`read_json`の出力がpublished columnと一致しない場合は`RC_JSON_SCHEMA_MISMATCH`、viewをparseまたはbindできない場合は`RC_CATALOG_VIEW_INVALID`、viewの依存関係が循環している場合は`RC_CATALOG_VIEW_CYCLE`を報告します。これらは`InMemoryCatalogControllerError.code`ではなく、DuckDB queryのerror messageに含まれます。
+`read_json`の出力が公開した列と一致しない場合は`RC_JSON_SCHEMA_MISMATCH`、`read_xlsx`の列名が一致しない場合は`RC_XLSX_SCHEMA_MISMATCH`、viewをparseまたはbindできない場合は`RC_CATALOG_VIEW_INVALID`、viewの依存関係が循環している場合は`RC_CATALOG_VIEW_CYCLE`を報告します。これらは`InMemoryCatalogControllerError.code`ではなく、DuckDB queryのerror messageに含まれます。
 
 ## Revision-based publication からの移行
 
@@ -228,8 +228,8 @@ Snapshot validation では Worker / extension から追加の catalog-specific c
 - Extension build では、`versions.lock` に指定された DuckDB commit と Emscripten version を使用します。これはホストアプリケーションが選択する DuckDB-Wasm version とは別の build input です。
 - Read-only catalog。DuckDB 側からの catalog mutation は拒否される。
 - `format_version: 2` は table、`format_version: 3` は view もサポートする。
-- Scanner は Parquet と CSV に対応します。
-- Parquet scanner options は空 object、CSV options はドキュメント記載の allowlist に限定されます。
+- ScannerはParquet、CSV、JSON、XLSXに対応します。
+- Scanner optionはドキュメントに記載したものだけ指定できます。
 - Host が完全な column metadata を与える必要があり、catalog 自体は schema inference を行わない。
 - Table `snapshot` はアプリケーションが管理し、表す bytes または physical schema が変わったときに更新する必要がある。
 - HTTP fragment による cache isolation は DuckDB 内部の cache key を分けるもの。Mutable remote resource を server 側で version-aware にするものではない。複数 version の query を同時実行するなら immutable/versioned URL が必要。

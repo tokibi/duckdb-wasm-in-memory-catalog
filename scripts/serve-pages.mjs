@@ -15,6 +15,7 @@ function contentType(path) {
     case '.wasm': return 'application/wasm'
     case '.parquet': return 'application/vnd.apache.parquet'
     case '.csv': return 'text/csv; charset=utf-8'
+    case '.xlsx': return 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
     default: return 'application/octet-stream'
   }
 }

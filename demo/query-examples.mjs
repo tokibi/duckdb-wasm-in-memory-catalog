@@ -46,6 +46,9 @@ function currentTarget() {
   const jsonTableName = snapshot?.schemas?.[0]?.tables?.find(
     (table) => table?.scanner?.type === 'json',
   )?.name
+  const xlsxTableName = snapshot?.schemas?.[0]?.tables?.find(
+    (table) => table?.scanner?.type === 'xlsx',
+  )?.name
   const viewName = snapshot?.schemas?.[0]?.views?.[0]?.name
   if (typeof schemaName !== 'string' || !schemaName) return null
   if (typeof tableName !== 'string' || !tableName) return null
@@ -56,6 +59,7 @@ function currentTarget() {
     tableName,
     csvTableName: typeof csvTableName === 'string' && csvTableName ? csvTableName : null,
     jsonTableName: typeof jsonTableName === 'string' && jsonTableName ? jsonTableName : null,
+    xlsxTableName: typeof xlsxTableName === 'string' && xlsxTableName ? xlsxTableName : null,
     viewName: typeof viewName === 'string' && viewName ? viewName : null,
   }
 }
@@ -106,6 +110,15 @@ ORDER BY event_id;`
   payload->>'$.action' AS action
 FROM ${jsonTable}
 ORDER BY event_id;`
+  }
+
+  if (target.xlsxTableName) {
+    const xlsxTable = [target.catalogName, target.schemaName, target.xlsxTableName]
+      .map(quoteIdentifier)
+      .join('.')
+    examples.xlsxRows = `SELECT *
+FROM ${xlsxTable}
+ORDER BY ABC;`
   }
 
   if (target.viewName) {

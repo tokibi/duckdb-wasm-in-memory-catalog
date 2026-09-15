@@ -20,6 +20,8 @@ describe('GitHub Pages demo view examples', () => {
     assert.match(appSource, /type: 'json'/)
     assert.match(appSource, /name: 'events_json'/)
     assert.match(appSource, /STRUCT\(browser VARCHAR, tags VARCHAR\[\]\)/)
+    assert.match(appSource, /type: 'xlsx'/)
+    assert.match(appSource, /name: 'spreadsheet_xlsx'/)
   })
 
   it('provides view metadata and view query examples', () => {
@@ -32,5 +34,7 @@ describe('GitHub Pages demo view examples', () => {
     assert.match(pageSource, /data-query-example="csvRows"/)
     assert.match(examplesSource, /examples\.jsonRows/)
     assert.match(pageSource, /data-query-example="jsonRows"/)
+    assert.match(examplesSource, /examples\.xlsxRows/)
+    assert.match(pageSource, /data-query-example="xlsxRows"/)
   })
 })
