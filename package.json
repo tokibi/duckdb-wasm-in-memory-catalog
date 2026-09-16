@@ -3,19 +3,29 @@
   "version": "0.0.0",
   "private": true,
   "type": "module",
-  "packageManager": "pnpm@10.17.1",
   "exports": {
-    ".": "./src/javascript/in-memory-catalog-controller.mjs",
-    "./worker": "./src/javascript/in-memory-catalog-worker.js",
-    "./metadata-store": "./src/javascript/in-memory-catalog-metadata-store.js",
-    "./worker-runtime": "./src/javascript/in-memory-catalog-worker-runtime.js"
+    ".": {
+      "types": "./dist/in-memory-catalog-controller.d.ts",
+      "import": "./dist/in-memory-catalog-controller.mjs"
+    },
+    "./worker": "./dist/in-memory-catalog-worker.js",
+    "./metadata-store": "./dist/in-memory-catalog-metadata-store.js",
+    "./worker-runtime": "./dist/in-memory-catalog-worker-runtime.js"
   },
   "scripts": {
-    "test": "node --test test/unit/*.test.mjs",
+    "build": "vite build && tsc -p tsconfig.lib.json",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "lint": "oxlint src demo scripts test vite.config.ts vite.demo.config.ts vitest.config.ts",
+    "fmt": "oxfmt src demo scripts test vite.config.ts vite.demo.config.ts vitest.config.ts package.json tsconfig.json tsconfig.lib.json oxlint.json .pre-commit-config.yaml",
+    "fmt:check": "oxfmt --check src demo scripts test vite.config.ts vite.demo.config.ts vitest.config.ts package.json tsconfig.json tsconfig.lib.json oxlint.json .pre-commit-config.yaml",
+    "typecheck": "tsc --noEmit",
+    "check": "pnpm lint && pnpm fmt:check && pnpm typecheck && pnpm test",
     "build:wasm": "sh scripts/build-wasm.sh",
-    "build:pages": "node scripts/build-pages.mjs && pnpm --dir docs build",
+    "build:pages": "pnpm build && node --experimental-strip-types scripts/build-pages.ts && pnpm --dir docs build",
     "build:docs": "pnpm --dir docs build",
-    "serve:pages": "node scripts/serve-pages.mjs"
+    "serve:pages": "node --experimental-strip-types scripts/serve-pages.ts",
+    "prek:install": "prek install"
   },
   "dependencies": {
     "apache-arrow": "17.0.0",
@@ -23,6 +33,14 @@
     "tslib": "2.8.1"
   },
   "devDependencies": {
-    "@duckdb/duckdb-wasm": "1.32.0"
-  }
+    "@duckdb/duckdb-wasm": "1.32.0",
+    "@j178/prek": "0.5.3",
+    "@types/node": "^22.20.2",
+    "oxfmt": "^0.68.0",
+    "oxlint": "^1.83.0",
+    "typescript": "^5.9.3",
+    "vite": "8.0.0",
+    "vitest": "^5.0.1"
+  },
+  "packageManager": "pnpm@10.17.1"
 }

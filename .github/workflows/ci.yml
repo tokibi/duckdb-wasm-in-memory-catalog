@@ -6,8 +6,8 @@ on:
   pull_request:
 
 jobs:
-  unit:
-    name: Unit tests and docs
+  quality:
+    name: Quality checks, tests, and library build
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
@@ -20,7 +20,8 @@ jobs:
           node-version: 22
           cache: pnpm
       - run: pnpm install --frozen-lockfile --ignore-scripts
-      - run: pnpm test
+      - run: pnpm check
+      - run: pnpm build
       - run: pnpm build:docs
 
   pages:

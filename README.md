@@ -53,7 +53,8 @@ git clone --recurse-submodules https://github.com/tokibi/duckdb-wasm-in-memory-c
 cd duckdb-wasm-in-memory-catalog
 corepack enable
 pnpm install --frozen-lockfile
-pnpm test
+pnpm check
+pnpm build
 make build-wasm
 ```
 
@@ -66,18 +67,21 @@ pnpm serve:pages
 
 Then open `http://127.0.0.1:4175/`. The demo is at `/` and the documentation is at `/docs/`.
 
+Install the Git hook once per checkout with `pnpm prek:install`. The hook runs the same
+oxlint and oxfmt checks used by CI.
+
 ## Repository layout
 
 ```text
 extensions/in_memory_catalog/       DuckDB extension build definition
 src/in_memory_catalog_extension.cpp extension implementation
-src/javascript/                     controller and Dedicated Worker runtime
+src/javascript/                     TypeScript controller and Dedicated Worker runtime
 demo/                               GitHub Pages browser demo
 docs/                               Ox Content user documentation
 scripts/build-wasm.sh               Wasm extension build using versions.lock
-scripts/build-pages.mjs             demo artifact build
-scripts/serve-pages.mjs             local Range-capable Pages preview
-test/unit/                           JavaScript component contracts
+scripts/build-pages.ts              demo artifact build
+scripts/serve-pages.ts              local Range-capable Pages preview
+test/unit/                           Vitest component contracts
 ```
 
 The DuckDB commit and Emscripten version used for extension builds are specified in `versions.lock`.

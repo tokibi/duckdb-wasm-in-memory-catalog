@@ -26,7 +26,7 @@ Serve these assets from your application:
 /extension/in_memory_catalog.duckdb_extension.wasm
 ```
 
-The `duckdb` files must come from a compatible `@duckdb/duckdb-wasm` version, and the catalog extension must be built for that DuckDB version and the `wasm_eh` platform. The repository's `scripts/build-pages.mjs` shows one concrete way to assemble the assets.
+The `duckdb` files must come from a compatible `@duckdb/duckdb-wasm` version, and the catalog extension must be built for that DuckDB version and the `wasm_eh` platform. The repository's `scripts/build-pages.ts` shows one concrete way to assemble the assets.
 
 ## 2. Create DuckDB-Wasm with the catalog Worker
 
