@@ -52,7 +52,7 @@ main: "Browser main thread" {
 
 worker: "Dedicated Worker\n(all children run here)" {
   direction: right
-  router: "Worker Router\ncatalog + DuckDB dispatch"
+  entrypoint: "Worker Entrypoint\ncatalog + DuckDB dispatch"
   catalog: "Catalog State\nmetadata store / runtime"
   wasm: "DuckDB-Wasm\nin-memory catalog extension\n(fetch/XHR runs in Worker)"
 }
@@ -60,11 +60,11 @@ worker: "Dedicated Worker\n(all children run here)" {
 remote: "Remote Files\nHTTP(S)"
 
 # Catalog session setup uses the Worker's regular message path.
-main.controller -> worker.router: {
+main.controller -> worker.entrypoint: {
   class: catalog_update
   label: "OPEN SESSION · Worker.postMessage\nMessagePort transferred"
 }
-worker.router -> worker.catalog: {
+worker.entrypoint -> worker.catalog: {
   class: catalog_update
   label: "create catalog session"
 }
@@ -77,11 +77,11 @@ main.controller -> worker.catalog: {
 }
 
 # Normal query and file path.
-main.client -> worker.router: {
+main.client -> worker.entrypoint: {
   class: query_io
   label: "QUERY · Worker.postMessage\nSQL copied (structured clone)\nresult: ArrayBuffer transferred"
 }
-worker.router -> worker.wasm: {
+worker.entrypoint -> worker.wasm: {
   class: query_io
   label: "dispatch SQL\nsame Worker"
 }

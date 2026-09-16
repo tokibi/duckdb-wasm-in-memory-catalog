@@ -9,7 +9,7 @@ description: Understand complete snapshots, table snapshots, scanners, files, an
 
 The in-memory catalog is a read-only projection of metadata owned by the host application.
 
-The controller and DuckDB client run on the browser's main thread. The catalog runtime and DuckDB-Wasm run in the same Dedicated Worker. That Worker loads the selected DuckDB-Wasm Worker script, and its router dispatches regular Worker messages to either the catalog runtime or DuckDB-Wasm.
+The controller and DuckDB client run on the browser's main thread. The catalog runtime and DuckDB-Wasm run in the same Dedicated Worker. That Worker's entrypoint loads the selected DuckDB-Wasm Worker script and dispatches catalog messages to the catalog runtime; all other Worker messages are passed to DuckDB-Wasm.
 
 ![Browser, Worker, and remote-file architecture](./assets/in-memory-catalog-worker-architecture-overview.svg)
 

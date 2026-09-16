@@ -162,7 +162,7 @@ const worker = createInMemoryCatalogWorker({
 })
 ```
 
-Creates the classic Worker wrapper used by DuckDB-Wasm and the catalog. `duckdbWorker` is required and must be the classic Worker belonging to the selected DuckDB-Wasm bundle. The wrapper currently supports `wasm_eh`; `wasm_mvp` and `coi` are not part of the supported API contract. The Worker URL and imported catalog assets must satisfy the application's CSP and browser same-origin/CORS rules.
+Creates the Worker entrypoint used by DuckDB-Wasm and the catalog. `duckdbWorker` is required and must be the classic Worker belonging to the selected DuckDB-Wasm bundle. The entrypoint currently supports `wasm_eh`; `wasm_mvp` and `coi` are not part of the supported API contract. The Worker URL and imported catalog assets must satisfy the application's CSP and browser same-origin/CORS rules.
 
 ### `catalog.connection`
 

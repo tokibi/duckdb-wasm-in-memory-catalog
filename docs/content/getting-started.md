@@ -12,14 +12,13 @@ This guide shows the shortest path from a DuckDB-Wasm database to a queryable in
 
 ## 1. Prepare the browser assets
 
-The catalog needs a custom Worker wrapper around the classic DuckDB-Wasm Worker. Provide the classic Worker URL belonging to the DuckDB-Wasm bundle selected by your application. The wrapper loads that Worker script into the same Dedicated Worker so the catalog extension can synchronously access its metadata bridge.
+The catalog needs a custom Worker entrypoint that loads the classic DuckDB-Wasm Worker script. Provide the classic Worker URL belonging to the DuckDB-Wasm bundle selected by your application. The entrypoint loads that script into the same Dedicated Worker so the catalog extension can synchronously access its metadata bridge.
 
 Serve these assets from your application:
 
 ```text
 /in-memory-catalog/in-memory-catalog-controller.mjs
 /in-memory-catalog/in-memory-catalog-worker.js
-/in-memory-catalog/common-worker-router.js
 /in-memory-catalog/in-memory-catalog-metadata-store.js
 /in-memory-catalog/in-memory-catalog-worker-runtime.js
 /duckdb/duckdb-browser-eh.worker.js
@@ -55,7 +54,7 @@ await db.open({
 })
 ```
 
-The same Worker is used by DuckDB-Wasm and the catalog controller. A normal DuckDB browser Worker is not sufficient because it does not handle the catalog's namespaced metadata messages. The supplied URL must point to a classic DuckDB-Wasm Worker; module Workers are not supported by this wrapper. The Worker script and all imported catalog scripts must be reachable under your CSP and have the required same-origin/CORS permissions.
+The same Worker is used by DuckDB-Wasm and the catalog controller. A normal DuckDB browser Worker is not sufficient because it does not handle the catalog's namespaced metadata messages. The supplied URL must point to a classic DuckDB-Wasm Worker; module Workers are not supported by this entrypoint. The Worker script and all imported catalog scripts must be reachable under your CSP and have the required same-origin/CORS permissions.
 
 `allowUnsignedExtensions` is required when loading the locally built Wasm extension.
 

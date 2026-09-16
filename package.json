@@ -8,8 +8,7 @@
     ".": "./src/javascript/in-memory-catalog-controller.mjs",
     "./worker": "./src/javascript/in-memory-catalog-worker.js",
     "./metadata-store": "./src/javascript/in-memory-catalog-metadata-store.js",
-    "./worker-runtime": "./src/javascript/in-memory-catalog-worker-runtime.js",
-    "./common-worker-router": "./src/javascript/common-worker-router.js"
+    "./worker-runtime": "./src/javascript/in-memory-catalog-worker-runtime.js"
   },
   "scripts": {
     "test": "node --test test/unit/*.test.mjs",

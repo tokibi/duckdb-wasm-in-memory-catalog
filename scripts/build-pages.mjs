@@ -23,7 +23,6 @@ await copy(
   'src/javascript/in-memory-catalog-controller.mjs',
   'in-memory-catalog/in-memory-catalog-controller.mjs',
 )
-await copy('src/javascript/common-worker-router.js', 'in-memory-catalog/common-worker-router.js')
 await copy(
   'src/javascript/in-memory-catalog-metadata-store.js',
   'in-memory-catalog/in-memory-catalog-metadata-store.js',
