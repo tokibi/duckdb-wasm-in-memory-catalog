@@ -52,6 +52,7 @@ export default defineConfig({
         }),
       },
       highlight: true,
+      resources: true,
       mermaid: true,
     }),
   ],

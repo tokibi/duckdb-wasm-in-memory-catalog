@@ -9,24 +9,11 @@ description: Understand complete snapshots, table snapshots, scanners, files, an
 
 The in-memory catalog is a read-only projection of metadata owned by the host application.
 
-```text
-application state
-      │
-      │ catalog snapshot / relation replacement
-      ▼
-Catalog controller
-      │
-      │ MessageChannel
-      ▼
-Dedicated Worker metadata store
-      │
-      │ table or view lookup
-      ▼
-in_memory_catalog extension
-      │
-      ▼
-DuckDB-Wasm
-```
+The controller and DuckDB client run on the browser's main thread. The catalog Worker wraps the selected DuckDB-Wasm Worker, routes catalog messages, and keeps catalog metadata in the same Dedicated Worker as the in-memory catalog extension.
+
+![Browser, Worker, and remote-file architecture](./assets/in-memory-catalog-worker-architecture.svg)
+
+Catalog updates use a dedicated `MessagePort`; metadata is copied at the structured-clone boundary and the port is transferred when the session opens. Queries use the normal Worker message path; query results use transferred `ArrayBuffer`s. The extension looks up current catalog metadata synchronously inside the Worker, while DuckDB-Wasm initiates HTTP(S) reads for the files.
 
 The application remains authoritative. DuckDB sees schemas, tables, views, and columns as normal catalog objects, but it does not own their definition.
 
