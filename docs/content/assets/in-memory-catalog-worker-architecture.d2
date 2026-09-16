@@ -46,7 +46,6 @@ classes: {
 direction: right
 
 main: "Browser main thread" {
-  direction: right
   controller: "Catalog Controller\ncatalog session + updates"
   client: "DuckDB Client\nAsyncDuckDB query API"
 }
@@ -59,18 +58,6 @@ worker: "Dedicated Worker\n(all children run here)" {
 }
 
 remote: "Remote Files\nHTTP(S)"
-
-main.style.fill: "#eff6ff"
-main.style.stroke: "#2563eb"
-worker.style.fill: "#f8fafc"
-worker.style.stroke: "#475569"
-main.grid-columns: 2
-main.grid-gap: 16
-
-# Keep the major runtime boundaries in a readable horizontal arrangement.
-main.near: top-left
-worker.near: top-center
-remote.near: top-right
 
 # Catalog update path.
 main.controller -> worker.catalog: {
