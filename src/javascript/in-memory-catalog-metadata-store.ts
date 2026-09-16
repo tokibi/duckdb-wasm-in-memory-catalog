@@ -66,6 +66,60 @@
   const DECIMAL_REVISION_PATTERN = /^(0|[1-9][0-9]*)$/;
   const MAX_UINT64 = (1n << 64n) - 1n;
 
+  type CatalogColumn = {
+    name: string;
+    type: string;
+    nullable: boolean;
+  };
+
+  type CatalogFile = {
+    uri: string;
+  };
+
+  type CatalogScanner = {
+    type: string;
+    options: Record<string, unknown>;
+  };
+
+  type CatalogTable = {
+    name: string;
+    snapshot: string;
+    scanner: CatalogScanner;
+    columns: CatalogColumn[];
+    files: CatalogFile[];
+  };
+
+  type CatalogView = {
+    name: string;
+    query: string;
+  };
+
+  type CatalogSchemaMetadata = {
+    name: string;
+    tables: CatalogTable[];
+    views?: CatalogView[];
+  };
+
+  type CatalogSchemaIndex = {
+    metadata: CatalogSchemaMetadata;
+    tables: Map<string, CatalogTable>;
+    tablePositions: Map<string, number>;
+    views: Map<string, CatalogView>;
+    viewPositions: Map<string, number>;
+  };
+
+  type CatalogSnapshot = {
+    format_version: 2 | 3;
+    schemas: CatalogSchemaMetadata[];
+  };
+
+  type CatalogState = {
+    revision: bigint;
+    snapshot: CatalogSnapshot;
+    schemas: Map<string, CatalogSchemaIndex>;
+    schemaPositions: Map<string, number>;
+  };
+
   class InMemoryCatalogError extends Error {
     code: string;
 
@@ -92,7 +146,7 @@
 
       const record: {
         workspaceId: string;
-        current: any;
+        current: CatalogState | undefined;
         pending: Promise<unknown>;
         closing: boolean;
       } = {
@@ -555,7 +609,7 @@
           ? JSON_SCANNER_OPTION_TYPES
           : XLSX_SCANNER_OPTION_TYPES;
     const options = {};
-    for (const [key, value] of Object.entries(input.options) as [string, any][]) {
+    for (const [key, value] of Object.entries(input.options) as [string, unknown][]) {
       const expectedType = optionTypes[key];
       if (!expectedType) {
         invalid(`${path}.options.${key} is not supported for ${type}`);
@@ -596,31 +650,32 @@
       ) {
         invalid(`${path}.options.${key} must be a string or an array of strings without NUL`);
       }
-      if (expectedType === "nonnegative_integer" && (!Number.isSafeInteger(value) || value < 0)) {
+      if (expectedType === "nonnegative_integer" && (!isSafeInteger(value) || value < 0)) {
         invalid(`${path}.options.${key} must be a non-negative safe integer`);
       }
-      if (expectedType === "positive_integer" && (!Number.isSafeInteger(value) || value <= 0)) {
+      if (expectedType === "positive_integer" && (!isSafeInteger(value) || value <= 0)) {
         invalid(`${path}.options.${key} must be a positive safe integer`);
       }
       if (
         expectedType === "json_object_size" &&
-        (!Number.isSafeInteger(value) || value <= 0 || value > 0xffffffff)
+        (!isSafeInteger(value) || value <= 0 || value > 0xffffffff)
       ) {
         invalid(`${path}.options.${key} must be a positive integer no greater than 4294967295`);
       }
-      if (
-        expectedType === "integer" &&
-        (!Number.isSafeInteger(value) || (value < 1 && value !== -1))
-      ) {
+      if (expectedType === "integer" && (!isSafeInteger(value) || (value < 1 && value !== -1))) {
         invalid(`${path}.options.${key} must be -1 or a positive safe integer`);
       }
       if (
         expectedType === "json_format" &&
-        !["auto", "array", "newline_delimited", "unstructured"].includes(value)
+        (typeof value !== "string" ||
+          !["auto", "array", "newline_delimited", "unstructured"].includes(value))
       ) {
         invalid(`${path}.options.${key} must be auto, array, newline_delimited, or unstructured`);
       }
-      if (expectedType === "json_records" && !["auto", "true", "false"].includes(value)) {
+      if (
+        expectedType === "json_records" &&
+        (typeof value !== "string" || !["auto", "true", "false"].includes(value))
+      ) {
         invalid(`${path}.options.${key} must be auto, true, or false`);
       }
       options[key] = value;
@@ -704,6 +759,10 @@
     return position === value.length;
   }
 
+  function isSafeInteger(value): value is number {
+    return Number.isSafeInteger(value);
+  }
+
   function parseBridgeRevision(value) {
     if (typeof value === "bigint" && value >= 0n && value <= MAX_UINT64) return value;
     if (typeof value === "string" && DECIMAL_REVISION_PATTERN.test(value)) {
@@ -745,7 +804,7 @@
     return value;
   }
 
-  function isRecord(value): value is Record<string, any> {
+  function isRecord(value): value is Record<string, unknown> {
     return value !== null && typeof value === "object" && !Array.isArray(value);
   }
 
