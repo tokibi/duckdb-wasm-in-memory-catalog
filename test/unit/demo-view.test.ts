@@ -3,6 +3,7 @@
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import { describe, it } from "vitest";
+import { resolveDemoRootUrl } from "../../demo/paths";
 
 const demoRoot = new URL("../../demo/", import.meta.url);
 const [appSource, examplesSource, pageSource] = await Promise.all([
@@ -12,6 +13,20 @@ const [appSource, examplesSource, pageSource] = await Promise.all([
 ]);
 
 describe("GitHub Pages demo view examples", () => {
+  it("resolves resources from the Pages subpath instead of the asset bundle path", () => {
+    const rootUrl = resolveDemoRootUrl("https://tokibi.github.io/duckdb-wasm-in-memory-catalog/");
+
+    assert.equal(
+      new URL("./data/demo.json", rootUrl).href,
+      "https://tokibi.github.io/duckdb-wasm-in-memory-catalog/data/demo.json",
+    );
+    assert.equal(
+      new URL("./duckdb/duckdb-browser.mjs", rootUrl).href,
+      "https://tokibi.github.io/duckdb-wasm-in-memory-catalog/duckdb/duckdb-browser.mjs",
+    );
+    assert.match(appSource, /resolveDemoRootUrl\(document\.baseURI\)/);
+  });
+
   it("starts with a catalog view backed by the nation table", () => {
     assert.match(appSource, /format_version: 3/);
     assert.match(appSource, /name: ["']nation_counts_by_region["']/);

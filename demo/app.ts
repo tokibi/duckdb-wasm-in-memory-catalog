@@ -2,6 +2,7 @@ import {
   createInMemoryCatalogWorker,
   InMemoryCatalogController,
 } from "../src/javascript/in-memory-catalog-controller";
+import { resolveDemoRootUrl } from "./paths";
 
 type DuckDBModule = typeof import("@duckdb/duckdb-wasm");
 
@@ -29,7 +30,7 @@ const steps = new Map(
   ]),
 );
 
-const rootUrl = new URL(/* @vite-ignore */ "./", import.meta.url);
+const rootUrl = resolveDemoRootUrl(document.baseURI);
 const defaultSql = `SELECT *
 FROM demo.analytics.nation_counts_by_region;`;
 
