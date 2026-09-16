@@ -1,4 +1,3 @@
-importScripts('./common-worker-router.js')
 importScripts('./in-memory-catalog-metadata-store.js')
 importScripts('./in-memory-catalog-worker-runtime.js')
 
@@ -9,15 +8,16 @@ if (!duckdbWorkerUrl) {
 importScripts(duckdbWorkerUrl)
 
 const dispatchDuckDBMessage = globalThis.onmessage
-const router = globalThis.DuckDBCommonWorkerRouter.createWorkerRouter(
-  dispatchDuckDBMessage,
-  globalThis,
-)
 const catalogStore = new globalThis.DuckDBInMemoryCatalogMetadata.InMemoryCatalogMetadataStore()
 const runtime = globalThis.DuckDBInMemoryCatalogWorkerRuntime.createInMemoryCatalogWorkerRuntime(
   catalogStore,
 )
 
-router.registerNamespace('IN_MEMORY_CATALOG', runtime.handleMessage)
 globalThis.DUCKDB_IN_MEMORY_CATALOG = runtime.bridge
-globalThis.onmessage = router.handleMessage
+globalThis.onmessage = (event) => {
+  const messageType = event?.data?.type
+  if (typeof messageType === 'string' && messageType.startsWith('IN_MEMORY_CATALOG_')) {
+    return runtime.handleMessage(event)
+  }
+  return dispatchDuckDBMessage.call(globalThis, event)
+}

@@ -12,14 +12,13 @@ DuckDB-Wasm の database から in-memory catalog をクエリできる状態ま
 
 ## 1. Browser asset を準備する
 
-Catalog は DuckDB-Wasm の classic Worker を包む custom Worker wrapper を必要とします。アプリケーションが選択した DuckDB-Wasm bundle に対応する classic Worker URL を指定します。wrapper はその Worker script を同じ Dedicated Worker 内で読み込むため、catalog extension から metadata bridge に同期アクセスできます。
+Catalog は DuckDB-Wasm の classic Worker script を読み込む custom Worker entrypoint を必要とします。アプリケーションが選択した DuckDB-Wasm bundle に対応する classic Worker URL を指定します。entrypoint はその Worker script を同じ Dedicated Worker 内で読み込むため、catalog extension から metadata bridge に同期アクセスできます。
 
 アプリケーションから次の asset を配信します。
 
 ```text
 /in-memory-catalog/in-memory-catalog-controller.mjs
 /in-memory-catalog/in-memory-catalog-worker.js
-/in-memory-catalog/common-worker-router.js
 /in-memory-catalog/in-memory-catalog-metadata-store.js
 /in-memory-catalog/in-memory-catalog-worker-runtime.js
 /duckdb/duckdb-browser-eh.worker.js

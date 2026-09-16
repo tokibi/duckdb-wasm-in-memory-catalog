@@ -9,9 +9,9 @@ export class InMemoryCatalogControllerError extends Error {
 /**
  * Create the classic Worker used by both DuckDB-Wasm and the catalog runtime.
  *
- * The catalog wrapper intentionally does not bundle or choose a DuckDB-Wasm
+ * The catalog entrypoint intentionally does not bundle or choose a DuckDB-Wasm
  * Worker. The caller supplies the Worker that matches its selected DuckDB-Wasm
- * bundle; the wrapper loads that script in the same Dedicated Worker so the
+ * bundle; the entrypoint loads that script in the same Dedicated Worker so the
  * synchronous extension bridge remains available.
  */
 export function createInMemoryCatalogWorker({ duckdbWorker, workerUrl } = {}) {

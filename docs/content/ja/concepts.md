@@ -9,7 +9,7 @@ description: complete snapshot、table snapshot、scanner、file、runtime owner
 
 インメモリカタログは、ホストアプリケーションが管理するメタデータを、DuckDB の読み取り専用カタログとして公開する仕組みです。
 
-カタログコントローラーと DuckDB クライアントは、ブラウザのメインスレッドで動作します。カタログランタイムと DuckDB-Wasm は、同じ Dedicated Worker 上で動作します。この Worker は選択された DuckDB-Wasm の Worker スクリプトを読み込み、Worker 内のルーターが通常の Worker メッセージをカタログランタイムと DuckDB-Wasm に振り分けます。
+カタログコントローラーと DuckDB クライアントは、ブラウザのメインスレッドで動作します。カタログランタイムと DuckDB-Wasm は、同じ Dedicated Worker 上で動作します。この Worker のエントリーポイントが選択された DuckDB-Wasm の Worker スクリプトを読み込み、カタログ用のメッセージをカタログランタイムへ渡します。それ以外の Worker メッセージは DuckDB-Wasm へ委譲します。
 
 ![Browser、Worker、remote file の構成](./assets/in-memory-catalog-worker-architecture-overview.svg)
 

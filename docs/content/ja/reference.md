@@ -162,7 +162,7 @@ const worker = createInMemoryCatalogWorker({
 })
 ```
 
-DuckDB-Wasm と catalog が共有する classic Worker wrapper を作成します。`duckdbWorker` は必須で、選択した DuckDB-Wasm bundle に対応する classic Worker を指定します。現在の対応範囲は `wasm_eh` で、`wasm_mvp` と `coi` は対応 API の契約に含まれません。Worker URL と catalog の各 asset は、アプリケーションの CSP およびブラウザーの same-origin/CORS 条件を満たす必要があります。
+DuckDB-Wasm と catalog が共有する Worker entrypoint を作成します。`duckdbWorker` は必須で、選択した DuckDB-Wasm bundle に対応する classic Worker を指定します。現在の対応範囲は `wasm_eh` で、`wasm_mvp` と `coi` は対応 API の契約に含まれません。Worker URL と catalog の各 asset は、アプリケーションの CSP およびブラウザーの same-origin/CORS 条件を満たす必要があります。
 
 ### `catalog.connection`
 
