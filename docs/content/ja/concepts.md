@@ -11,7 +11,7 @@ description: complete snapshot、table snapshot、scanner、file、runtime owner
 
 カタログコントローラーと DuckDB クライアントは、ブラウザのメインスレッドで動作します。カタログ用 Worker は、選択した DuckDB-Wasm Worker を包み、カタログ用メッセージを振り分け、インメモリカタログ拡張機能と同じ Dedicated Worker 内にカタログメタデータを保持します。
 
-![Browser、Worker、remote file の構成](./assets/in-memory-catalog-worker-architecture.svg)
+![Browser、Worker、remote file の構成](./assets/in-memory-catalog-worker-architecture-overview.svg)
 
 カタログの更新には専用の `MessagePort` を使います。メタデータは構造化複製の境界でコピーされ、セッション開始時にポートが転送されます。クエリは通常の Worker メッセージ経路を使い、クエリ結果は `ArrayBuffer` として転送されます。拡張機能は Worker 内で現在のカタログメタデータを同期的に参照し、ファイルの HTTP(S) 読み取りは DuckDB-Wasm が開始します。
 
