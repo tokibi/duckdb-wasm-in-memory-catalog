@@ -1,0 +1,8 @@
+{
+  "$schema": "https://oxc.rs/schema/oxlint.json",
+  "ignorePatterns": ["build/**", "dist/**", "docs/**", "node_modules/**"],
+  "plugins": ["typescript"],
+  "rules": {
+    "no-unused-vars": "error"
+  }
+}

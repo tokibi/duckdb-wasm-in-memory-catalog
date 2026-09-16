@@ -26,7 +26,7 @@ Catalog は DuckDB-Wasm の classic Worker script を読み込む custom Worker 
 /extension/in_memory_catalog.duckdb_extension.wasm
 ```
 
-`duckdb` のファイルは、互換性のある `@duckdb/duckdb-wasm` version から用意し、catalog extension はその DuckDB version と `wasm_eh` platform 向けに build します。具体的な配置方法は、このリポジトリの `scripts/build-pages.mjs` を参考にできます。
+`duckdb` のファイルは、互換性のある `@duckdb/duckdb-wasm` version から用意し、catalog extension はその DuckDB version と `wasm_eh` platform 向けに build します。具体的な配置方法は、このリポジトリの `scripts/build-pages.ts` を参考にできます。
 
 ## 2. Catalog Worker で DuckDB-Wasm を作成する
 
