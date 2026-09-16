@@ -1,5 +1,5 @@
 # High-level runtime boundaries for the browser integration.
-# Teal is the catalog-update path; purple is the normal query/file path.
+# Teal is the catalog session/update path; purple is the normal query/file path.
 # Orange dashed edges are synchronous catalog lookups inside the Worker.
 
 vars: {
@@ -9,7 +9,7 @@ vars: {
   d2-legend: "Path legend" {
     catalog_update_from: "" {style.opacity: 0}
     catalog_update_to: "" {style.opacity: 0}
-    catalog_update_from -> catalog_update_to: "catalog update" {class: catalog_update}
+    catalog_update_from -> catalog_update_to: "catalog session & update" {class: catalog_update}
 
     query_io_from: "" {style.opacity: 0}
     query_io_to: "" {style.opacity: 0}
@@ -59,11 +59,21 @@ worker: "Dedicated Worker\n(all children run here)" {
 
 remote: "Remote Files\nHTTP(S)"
 
-# Catalog update path.
+# Catalog session setup uses the Worker's regular message path.
+main.controller -> worker.router: {
+  class: catalog_update
+  label: "OPEN SESSION · Worker.postMessage\nMessagePort transferred"
+}
+worker.router -> worker.catalog: {
+  class: catalog_update
+  label: "create catalog session"
+}
+
+# Catalog updates use the dedicated MessagePort after setup.
 main.controller -> worker.catalog: {
   class: catalog_update
   label.near: top-center
-  label: "CATALOG UPDATE · MessagePort\nmetadata copied (structured clone)\nport transferred once"
+  label: "CATALOG UPDATE · MessagePort\nmetadata copied (structured clone)"
 }
 
 # Normal query and file path.
