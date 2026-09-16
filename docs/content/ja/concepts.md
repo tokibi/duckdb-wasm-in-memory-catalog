@@ -7,26 +7,13 @@ description: complete snapshot、table snapshot、scanner、file、runtime owner
 
 ## Catalog model
 
-In-memory catalog は、ホストアプリケーションが管理するメタデータを読み取り専用で DuckDB に投影する仕組みです。
+インメモリカタログは、ホストアプリケーションが管理するメタデータを、DuckDB の読み取り専用カタログとして公開する仕組みです。
 
-```text
-application state
-      │
-      │ catalog snapshot / relation replacement
-      ▼
-Catalog controller
-      │
-      │ MessageChannel
-      ▼
-Dedicated Worker metadata store
-      │
-      │ table or view lookup
-      ▼
-in_memory_catalog extension
-      │
-      ▼
-DuckDB-Wasm
-```
+カタログコントローラーと DuckDB クライアントは、ブラウザのメインスレッドで動作します。カタログランタイムと DuckDB-Wasm は、同じ Dedicated Worker 上で動作します。この Worker は選択された DuckDB-Wasm の Worker スクリプトを読み込み、Worker 内のルーターが通常の Worker メッセージをカタログランタイムと DuckDB-Wasm に振り分けます。
+
+![Browser、Worker、remote file の構成](./assets/in-memory-catalog-worker-architecture-overview.svg)
+
+カタログの更新には専用の `MessagePort` を使います。メタデータは構造化複製の境界でコピーされ、セッション開始時にポートが転送されます。クエリは通常の Worker メッセージ経路を使い、クエリ結果は `ArrayBuffer` として転送されます。拡張機能は Worker 内で現在のカタログメタデータを同期的に参照し、ファイルの HTTP(S) 読み取りは DuckDB-Wasm が開始します。
 
 Authority は常にアプリケーション側にあります。DuckDB からは schema、table、view、column が通常の catalog object として見えますが、その定義を DuckDB が所有するわけではありません。
 

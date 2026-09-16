@@ -1,0 +1,103 @@
+# High-level runtime boundaries for the browser integration.
+# Teal is the catalog session/update path; purple is the normal query/file path.
+# Orange dashed edges are synchronous catalog lookups inside the Worker.
+
+vars: {
+  d2-config: {
+    layout-engine: tala
+  }
+  d2-legend: "Path legend" {
+    catalog_update_from: "" {style.opacity: 0}
+    catalog_update_to: "" {style.opacity: 0}
+    catalog_update_from -> catalog_update_to: "catalog session & update" {class: catalog_update}
+
+    query_io_from: "" {style.opacity: 0}
+    query_io_to: "" {style.opacity: 0}
+    query_io_from -> query_io_to: "query & file I/O" {class: query_io}
+
+    catalog_lookup_from: "" {style.opacity: 0}
+    catalog_lookup_to: "" {style.opacity: 0}
+    catalog_lookup_from -> catalog_lookup_to: "synchronous catalog lookup" {class: catalog_lookup}
+  }
+}
+
+classes: {
+  catalog_update: {
+    style: {
+      stroke: "#0f766e"
+      stroke-width: 3
+    }
+  }
+  query_io: {
+    style: {
+      stroke: "#7c3aed"
+      stroke-width: 3
+    }
+  }
+  catalog_lookup: {
+    style: {
+      stroke: "#d97706"
+      stroke-width: 2
+      stroke-dash: 5
+    }
+  }
+}
+
+direction: right
+
+main: "Browser main thread" {
+  controller: "Catalog Controller\ncatalog session + updates"
+  client: "DuckDB Client\nAsyncDuckDB query API"
+}
+
+worker: "Dedicated Worker\n(all children run here)" {
+  direction: right
+  router: "Worker Router\ncatalog + DuckDB dispatch"
+  catalog: "Catalog State\nmetadata store / runtime"
+  wasm: "DuckDB-Wasm\nin-memory catalog extension\n(fetch/XHR runs in Worker)"
+}
+
+remote: "Remote Files\nHTTP(S)"
+
+# Catalog session setup uses the Worker's regular message path.
+main.controller -> worker.router: {
+  class: catalog_update
+  label: "OPEN SESSION · Worker.postMessage\nMessagePort transferred"
+}
+worker.router -> worker.catalog: {
+  class: catalog_update
+  label: "create catalog session"
+}
+
+# Catalog updates use the dedicated MessagePort after setup.
+main.controller -> worker.catalog: {
+  class: catalog_update
+  label.near: top-center
+  label: "CATALOG UPDATE · MessagePort\nmetadata copied (structured clone)"
+}
+
+# Normal query and file path.
+main.client -> worker.router: {
+  class: query_io
+  label: "QUERY · Worker.postMessage\nSQL copied (structured clone)\nresult: ArrayBuffer transferred"
+}
+worker.router -> worker.wasm: {
+  class: query_io
+  label: "dispatch SQL\nsame Worker"
+}
+
+# Synchronous extension-to-catalog reference inside the Dedicated Worker.
+worker.wasm -> worker.catalog: {
+  class: catalog_lookup
+  label: "synchronous bridge\nreads current catalog state"
+}
+worker.catalog -> worker.wasm: {
+  class: catalog_lookup
+  label: "catalog data: copied"
+}
+
+# File access is initiated by the Worker-local DuckDB runtime.
+worker.wasm -> remote: {
+  class: query_io
+  label: "HTTP fetch / XHR (Worker)\nfile / range request\nresponse copied to Wasm memory"
+}
