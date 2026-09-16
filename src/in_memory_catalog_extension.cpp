@@ -365,6 +365,33 @@ static Value DecodeJSONScannerOption(const string &key, yyjson_val *value) {
 	return Value(std::move(result));
 }
 
+static bool IsSupportedXLSXScannerOption(const string &key) {
+	static const unordered_set<string> supported_options {"header",        "sheet",         "range",
+	                                                      "all_varchar",   "ignore_errors", "stop_at_empty",
+	                                                      "empty_as_varchar"};
+	return supported_options.find(key) != supported_options.end();
+}
+
+static Value DecodeXLSXScannerOption(const string &key, yyjson_val *value) {
+	if (!IsSupportedXLSXScannerOption(key)) {
+		DescriptorInvalid();
+	}
+	if (key == "sheet" || key == "range") {
+		if (!yyjson_is_str(value)) {
+			DescriptorInvalid();
+		}
+		string result(unsafe_yyjson_get_str(value), unsafe_yyjson_get_len(value));
+		if (result.empty() || result.find('\0') != string::npos) {
+			DescriptorInvalid();
+		}
+		return Value(std::move(result));
+	}
+	if (!yyjson_is_bool(value)) {
+		DescriptorInvalid();
+	}
+	return Value::BOOLEAN(yyjson_get_bool(value));
+}
+
 static void DecodeScanner(yyjson_val *object, CatalogTableDescriptor &descriptor) {
 	auto scanner = yyjson_obj_get(object, "scanner");
 	if (!scanner || !yyjson_is_obj(scanner) || yyjson_obj_size(scanner) != 2) {
@@ -372,7 +399,7 @@ static void DecodeScanner(yyjson_val *object, CatalogTableDescriptor &descriptor
 	}
 	descriptor.scanner.type = JSONString(scanner, "type");
 	if (descriptor.scanner.type != "parquet" && descriptor.scanner.type != "csv" &&
-	    descriptor.scanner.type != "json") {
+	    descriptor.scanner.type != "json" && descriptor.scanner.type != "xlsx") {
 		DescriptorInvalid();
 	}
 	auto options = yyjson_obj_get(scanner, "options");
@@ -382,7 +409,7 @@ static void DecodeScanner(yyjson_val *object, CatalogTableDescriptor &descriptor
 	if (descriptor.scanner.type == "parquet" && yyjson_obj_size(options) != 0) {
 		DescriptorInvalid();
 	}
-	if (descriptor.scanner.type == "csv" || descriptor.scanner.type == "json") {
+	if (descriptor.scanner.type != "parquet") {
 		size_t index, count;
 		yyjson_val *key, *option_value;
 		yyjson_obj_foreach(options, index, count, key, option_value) {
@@ -390,8 +417,10 @@ static void DecodeScanner(yyjson_val *object, CatalogTableDescriptor &descriptor
 			if (descriptor.scanner.type == "csv") {
 				descriptor.scanner.options.emplace(CSVScannerOptionName(option_name),
 				                                  DecodeCSVScannerOption(option_name, option_value));
-			} else {
+			} else if (descriptor.scanner.type == "json") {
 				descriptor.scanner.options.emplace(option_name, DecodeJSONScannerOption(option_name, option_value));
+			} else {
+				descriptor.scanner.options.emplace(option_name, DecodeXLSXScannerOption(option_name, option_value));
 			}
 		}
 	}
@@ -552,6 +581,9 @@ static shared_ptr<const CatalogTableDescriptor> DecodeProductionDescriptor(const
 			DescriptorInvalid();
 		}
 		descriptor->files.push_back(std::move(catalog_file));
+	}
+	if (descriptor->scanner.type == "xlsx" && descriptor->files.size() != 1) {
+		DescriptorInvalid();
 	}
 	return descriptor;
 }
@@ -1010,11 +1042,14 @@ public:
 
 	TableFunction GetScanFunction(ClientContext &context, unique_ptr<FunctionData> &bind_data) override {
 		const auto &scanner = descriptor->scanner;
-		const auto scanner_name =
-		    scanner.type == "csv" ? "read_csv" : scanner.type == "json" ? "read_json" : "parquet_scan";
+		const auto scanner_name = scanner.type == "csv"    ? "read_csv"
+		                          : scanner.type == "json" ? "read_json"
+		                          : scanner.type == "xlsx" ? "read_xlsx"
+		                                                   : "parquet_scan";
 		auto &entry = Catalog::GetSystemCatalog(context).GetEntry<TableFunctionCatalogEntry>(context, DEFAULT_SCHEMA,
 		                                                                                     scanner_name);
-		auto function = entry.functions.GetFunctionByArguments(context, {LogicalType::LIST(LogicalType::VARCHAR)});
+		auto function = entry.functions.GetFunctionByArguments(
+		    context, {scanner.type == "xlsx" ? LogicalType::VARCHAR : LogicalType::LIST(LogicalType::VARCHAR)});
 
 		vector<Value> files;
 		files.reserve(descriptor->files.size());
@@ -1039,7 +1074,7 @@ public:
 			}
 			named_parameters["schema"] =
 			    Value::MAP(LogicalType::VARCHAR, schema_struct_type, std::move(schema_keys), std::move(schema_values));
-		} else {
+		} else if (scanner.type == "csv" || scanner.type == "json") {
 			// Text scanners use the Catalog schema as their explicit columns definition.
 			child_list_t<Value> column_definitions;
 			column_definitions.reserve(descriptor->columns.size());
@@ -1047,14 +1082,18 @@ public:
 				column_definitions.emplace_back(column.name, Value(column.type.ToString()));
 			}
 			named_parameters["columns"] = Value::STRUCT(std::move(column_definitions));
-			for (const auto &option : scanner.options) {
-				named_parameters[option.first] = option.second;
-			}
+		}
+		for (const auto &option : scanner.options) {
+			named_parameters[option.first] = option.second;
 		}
 
-		if (scanner.type == "json") {
+		if (scanner.type == "json" || scanner.type == "xlsx") {
 			vector<Value> inputs;
-			inputs.push_back(Value::LIST(LogicalType::VARCHAR, files));
+			if (scanner.type == "xlsx") {
+				inputs.push_back(files[0]);
+			} else {
+				inputs.push_back(Value::LIST(LogicalType::VARCHAR, files));
+			}
 			vector<LogicalType> input_table_types;
 			vector<string> input_table_names;
 			vector<LogicalType> return_types;
@@ -1064,12 +1103,24 @@ public:
 			                             function.function_info.get(), nullptr, function, ref);
 			bind_data = function.bind(context, input, return_types, return_names);
 			if (return_names.size() != descriptor->columns.size()) {
+				if (scanner.type == "xlsx") {
+					throw InvalidInputException(
+					    "RC_XLSX_SCHEMA_MISMATCH: physical column count does not match Catalog metadata");
+				}
 				throw InvalidInputException(
 				    "RC_JSON_SCHEMA_MISMATCH: physical column count does not match Catalog metadata");
 			}
 			for (idx_t index = 0; index < descriptor->columns.size(); index++) {
 				const auto &column = descriptor->columns[index];
-				if (return_names[index] != column.name || return_types[index] != column.type) {
+				if (return_names[index] != column.name) {
+					if (scanner.type == "xlsx") {
+						throw InvalidInputException(
+						    "RC_XLSX_SCHEMA_MISMATCH: physical column order or name does not match Catalog metadata");
+					}
+					throw InvalidInputException(
+					    "RC_JSON_SCHEMA_MISMATCH: physical column order, name, or type does not match Catalog metadata");
+				}
+				if (scanner.type == "json" && return_types[index] != column.type) {
 					throw InvalidInputException(
 					    "RC_JSON_SCHEMA_MISMATCH: physical column order, name, or type does not match Catalog metadata");
 				}

@@ -64,7 +64,7 @@ The scanner is table-level because all files forming one table are expected to s
 
 `format_version: 2` requires an explicit scanner. The catalog never chooses one from a filename, extension, or URI shape.
 
-The current implementation supports Parquet and CSV. See [Scanners](./scanners.md) for scanner configuration and the complete list of accepted options.
+The current implementation supports Parquet, CSV, JSON, and XLSX. See [Scanners](./scanners.md) for scanner configuration and the complete list of accepted options.
 
 ```js
 scanner: {

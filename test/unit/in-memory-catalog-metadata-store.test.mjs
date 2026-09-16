@@ -440,6 +440,50 @@ describe('InMemoryCatalogMetadataStore', () => {
     }
   })
 
+  it('accepts xlsx scanner options for exactly one file', async () => {
+    const store = new InMemoryCatalogMetadataStore()
+    const session = store.openWorkspaceSession('workspace')
+    const candidate = snapshot('https://example.test/table.xlsx')
+    candidate.schemas[0].tables[0].scanner = {
+      type: 'xlsx',
+      options: {
+        header: true,
+        sheet: 'Data',
+        range: 'A1:C20',
+        all_varchar: false,
+        ignore_errors: true,
+        stop_at_empty: false,
+        empty_as_varchar: true,
+      },
+    }
+
+    await session.replaceCatalogSnapshot(candidate)
+    assert.deepEqual(
+      store.lookupTable('workspace', '1', 'main', 'table1').scanner,
+      candidate.schemas[0].tables[0].scanner,
+    )
+  })
+
+  it('rejects unsupported xlsx options, malformed values, and multiple files', async () => {
+    const store = new InMemoryCatalogMetadataStore()
+    const session = store.openWorkspaceSession('workspace')
+    for (const [option, value] of [
+      ['normalize_names', true],
+      ['sheet', ''],
+      ['range', false],
+      ['header', 'true'],
+    ]) {
+      const candidate = snapshot('https://example.test/table.xlsx')
+      candidate.schemas[0].tables[0].scanner = { type: 'xlsx', options: { [option]: value } }
+      await expectCode(() => session.replaceCatalogSnapshot(candidate), 'RC_METADATA_INVALID')
+    }
+
+    const multiple = snapshot('https://example.test/table.xlsx')
+    multiple.schemas[0].tables[0].scanner = { type: 'xlsx', options: {} }
+    multiple.schemas[0].tables[0].files.push({ uri: 'https://example.test/table-2.xlsx' })
+    await expectCode(() => session.replaceCatalogSnapshot(multiple), 'RC_METADATA_INVALID')
+  })
+
   it('rejects the previous snapshot format instead of choosing a scanner implicitly', async () => {
     const store = new InMemoryCatalogMetadataStore()
     const session = store.openWorkspaceSession('workspace')

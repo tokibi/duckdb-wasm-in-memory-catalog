@@ -64,7 +64,7 @@ files[].uri  file がどこにあるか
 
 `format_version: 2` では scanner の明示指定が必須です。Catalog は filename、extension、URI から scanner を選びません。
 
-現在は Parquet と CSV をサポートしています。Scanner の設定と受け付ける option の一覧は [Scanner](./scanners.md) を参照してください。
+現在はParquet、CSV、JSON、XLSXに対応しています。Scannerの設定と指定できるoptionは[Scanner](./scanners.md)を参照してください。
 
 ```js
 scanner: {

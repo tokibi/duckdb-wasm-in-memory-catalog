@@ -152,6 +152,30 @@ describe('In-Memory Catalog Worker runtime', () => {
     assert.deepEqual(descriptor.columns, candidate.schemas[0].tables[0].columns)
   })
 
+  it('transfers xlsx scanner options through the Worker bridge', async () => {
+    const store = new InMemoryCatalogMetadataStore()
+    const runtime = createInMemoryCatalogWorkerRuntime(store)
+    const port = new FakePort()
+    await runtime.handleMessage({
+      data: { type: 'IN_MEMORY_CATALOG_OPEN_WORKSPACE_SESSION', workspace_id: 'workspace' },
+      ports: [port],
+    })
+    const candidate = snapshot('https://example.test/table.xlsx')
+    candidate.schemas[0].tables[0].scanner = {
+      type: 'xlsx', options: { header: true, sheet: 'Data', range: 'A1:C20' },
+    }
+    await port.dispatch({
+      type: 'IN_MEMORY_CATALOG_REPLACE_SNAPSHOT',
+      request_id: 'replace-xlsx-1',
+      snapshot: candidate,
+    })
+
+    assert.deepEqual(
+      JSON.parse(runtime.bridge.lookupTable('workspace', '1', 'main', 'table1')).scanner,
+      candidate.schemas[0].tables[0].scanner,
+    )
+  })
+
   it('acknowledges a dedicated table replacement without exposing a revision', async () => {
     const store = new InMemoryCatalogMetadataStore()
     const runtime = createInMemoryCatalogWorkerRuntime(store)

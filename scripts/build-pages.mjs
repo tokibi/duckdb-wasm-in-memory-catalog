@@ -4,6 +4,7 @@ import { resolve } from 'node:path'
 
 const outputRoot = resolve('build/pages')
 const fixtureSource = 'https://blobs.duckdb.org/data/tpch-sf0.01-parquet/nation.parquet'
+const xlsxFixtureSource = 'https://raw.githubusercontent.com/duckdb/duckdb-excel/27ebb61/test/data/xlsx/google_sheets.xlsx'
 
 async function copy(source, destination) {
   await mkdir(resolve(outputRoot, destination, '..'), { recursive: true })
@@ -96,6 +97,15 @@ const jsonFixture = [
 await writeFile(
   resolve(outputRoot, 'data/demo-events.json'),
   `${JSON.stringify(jsonFixture, null, 2)}\n`,
+)
+
+const xlsxFixtureResponse = await fetch(xlsxFixtureSource)
+if (!xlsxFixtureResponse.ok) {
+  throw new Error(`Demo XLSX download failed: HTTP ${xlsxFixtureResponse.status}`)
+}
+await writeFile(
+  resolve(outputRoot, 'data/demo.xlsx'),
+  Buffer.from(await xlsxFixtureResponse.arrayBuffer()),
 )
 
 process.stdout.write(

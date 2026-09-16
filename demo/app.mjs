@@ -44,6 +44,7 @@ function loadMetadata() {
 function defaultCatalog(metadata, fileUrl) {
   const csvFileUrl = new URL('./data/demo.csv', rootUrl).href
   const jsonFileUrl = new URL('./data/demo-events.json', rootUrl).href
+  const xlsxFileUrl = new URL('./data/demo.xlsx', rootUrl).href
   return {
     format_version: 3,
     schemas: [
@@ -87,6 +88,20 @@ function defaultCatalog(metadata, fileUrl) {
               { name: 'payload', type: 'JSON', nullable: true },
             ],
             files: [{ uri: jsonFileUrl }],
+          },
+          {
+            name: 'spreadsheet_xlsx',
+            snapshot: 'demo-xlsx-v1',
+            scanner: {
+              type: 'xlsx',
+              options: { header: true },
+            },
+            columns: [
+              { name: 'ABC', type: 'DOUBLE', nullable: true },
+              { name: 'HELLO', type: 'VARCHAR', nullable: true },
+              { name: 'WORLD', type: 'VARCHAR', nullable: true },
+            ],
+            files: [{ uri: xlsxFileUrl }],
           },
         ],
         views: [

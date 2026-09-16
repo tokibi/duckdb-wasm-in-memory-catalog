@@ -216,6 +216,29 @@ describe('InMemoryCatalogController', () => {
     ))
   })
 
+  it('loads excel once before publishing an xlsx scanner', async () => {
+    const store = new InMemoryCatalogMetadataStore()
+    const worker = runtimeWorker(createInMemoryCatalogWorkerRuntime(store))
+    const { db, queries } = fakeDatabase()
+    const initial = snapshot('https://example.test/table.xlsx')
+    initial.schemas[0].tables[0].scanner = { type: 'xlsx', options: { header: true } }
+    const controller = await InMemoryCatalogController.initialize(
+      db, worker, { workspaceId: 'workspace', catalogName: 'dataset', ackTimeoutMs: 100 }, initial,
+    )
+    try {
+      const replacement = structuredClone(initial.schemas[0].tables[0])
+      replacement.scanner.options = { header: true, sheet: 'Data' }
+      await controller.replaceTable('main', replacement)
+
+      assert.equal(queries.filter((query) => query === 'LOAD excel').length, 1)
+      assert.ok(queries.indexOf('LOAD excel') < queries.indexOf(
+        'ATTACH \'workspace\' AS "dataset" (TYPE in_memory_catalog, READ_ONLY)',
+      ))
+    } finally {
+      await controller.close()
+    }
+  })
+
   it('rejects ambiguous extension configuration', async () => {
     const { db } = fakeDatabase()
     await assert.rejects(
@@ -366,7 +389,7 @@ describe('InMemoryCatalogController', () => {
       {
         workspaceId: 'workspace',
         catalogName: 'dataset',
-        ackTimeoutMs: 5,
+        ackTimeoutMs: 50,
         onRecoveryRequired(details) {
           recovery.push(details)
           throw new Error('observer failure')

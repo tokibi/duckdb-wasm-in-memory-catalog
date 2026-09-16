@@ -9,7 +9,7 @@
     'VARCHAR',
     'DATE', 'TIMESTAMP', 'TIMESTAMP_TZ',
   ])
-  const SUPPORTED_SCANNERS = new Set(['parquet', 'csv', 'json'])
+  const SUPPORTED_SCANNERS = new Set(['parquet', 'csv', 'json', 'xlsx'])
   const CSV_SCANNER_OPTION_TYPES = Object.freeze({
     auto_detect: 'boolean',
     header: 'boolean',
@@ -44,6 +44,15 @@
     maximum_object_size: 'json_object_size',
     dateformat: 'string',
     timestampformat: 'string',
+  })
+  const XLSX_SCANNER_OPTION_TYPES = Object.freeze({
+    header: 'boolean',
+    sheet: 'string',
+    range: 'string',
+    all_varchar: 'boolean',
+    ignore_errors: 'boolean',
+    stop_at_empty: 'boolean',
+    empty_as_varchar: 'boolean',
   })
   const DECIMAL_REVISION_PATTERN = /^(0|[1-9][0-9]*)$/
   const MAX_UINT64 = (1n << 64n) - 1n
@@ -441,6 +450,9 @@
     if (!Array.isArray(input.files) || input.files.length === 0) {
       invalid(`${path}.files must contain at least one URI`)
     }
+    if (scanner.type === 'xlsx' && input.files.length !== 1) {
+      invalid(`${path}.files must contain exactly one URI for xlsx`)
+    }
 
     const columnNames = new Set()
     const columns = input.columns.map((column, index) => {
@@ -504,7 +516,11 @@
       return deepFreeze({ type, options: {} })
     }
 
-    const optionTypes = type === 'csv' ? CSV_SCANNER_OPTION_TYPES : JSON_SCANNER_OPTION_TYPES
+    const optionTypes = type === 'csv'
+      ? CSV_SCANNER_OPTION_TYPES
+      : type === 'json'
+        ? JSON_SCANNER_OPTION_TYPES
+        : XLSX_SCANNER_OPTION_TYPES
     const options = {}
     for (const [key, value] of Object.entries(input.options)) {
       const expectedType = optionTypes[key]

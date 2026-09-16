@@ -1,6 +1,6 @@
 ---
 title: Scanners
-description: Configure the Parquet, CSV, and JSON scanners accepted by the catalog.
+description: Configure the Parquet, CSV, JSON, and XLSX scanners accepted by the catalog.
 ---
 
 # Scanners
@@ -112,3 +112,33 @@ If an option is omitted, DuckDB's default is used.
 
 - `columns` is supplied by the catalog metadata. Schema-inference options are not accepted.
 - Virtual/partition columns, `union_by_name`, aliases, and COPY-only options are not supported.
+
+## XLSX
+
+XLSX tables use DuckDB's `read_xlsx` scanner. Each table must contain exactly one `.xlsx` file; legacy `.xls` files are not supported.
+
+```js
+scanner: {
+  type: 'xlsx',
+  options: {
+    sheet: 'Data',
+    header: true,
+  },
+}
+```
+
+The detected column names and order must match the catalog `columns`. Values are cast to the catalog column types while scanning. If an option is omitted, DuckDB's default is used.
+
+### XLSX options
+
+| Option | Accepted value | Default | Description |
+| --- | --- | --- | --- |
+| `header` | `true` / `false` | Auto-detect | Treat the first row as column names. |
+| `sheet` | Non-empty string without NUL | First sheet | Worksheet name. |
+| `range` | Non-empty string without NUL | Auto-detect | Cell range in DuckDB spreadsheet notation. |
+| `all_varchar` | `true` / `false` | `false` | Read every column as `VARCHAR` before casting to the catalog type. |
+| `ignore_errors` | `true` / `false` | `false` | Convert values that cannot be cast to `NULL`. |
+| `stop_at_empty` | `true` / `false` | `true`; `false` when `range` is set | Stop after an empty row. |
+| `empty_as_varchar` | `true` / `false` | `false` | Infer an empty column as `VARCHAR`. |
+
+`normalize_names` is not accepted because column names are defined by the catalog contract.
