@@ -65,7 +65,7 @@ The schema name and table's `name` identify the target. A missing target is an e
 
 ## Publish and update views
 
-Use `format_version: 1` and define each view with a name and one `SELECT` query:
+Define each view with a name and one `SELECT` query:
 
 ```js
 const snapshot = {

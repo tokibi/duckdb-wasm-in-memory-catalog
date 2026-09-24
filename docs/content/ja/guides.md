@@ -65,7 +65,7 @@ Schema 名と table の `name` で対象を特定します。対象が存在し�
 
 ## View を publish・更新する
 
-`format_version: 1` を使い、各 view を名前と単一の `SELECT` query で定義します。
+各 view を名前と単一の `SELECT` query で定義します。
 
 ```js
 const snapshot = {

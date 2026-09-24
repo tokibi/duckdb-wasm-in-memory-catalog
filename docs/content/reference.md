@@ -47,11 +47,11 @@ A catalog publication sends one complete snapshot.
 
 | Field | Meaning |
 | --- | --- |
-| `format_version` | Snapshot schema version. Use `1` for tables and views. |
+| `format_version` | Snapshot schema version (`1`). |
 | `schemas` | Complete set of schemas published by the application. |
 | `schemas[].name` | DuckDB schema name. |
 | `schemas[].tables` | Tables in the schema. |
-| `schemas[].views` | Views in the schema. Available with `format_version: 1`. |
+| `schemas[].views` | Views in the schema. |
 | `tables[].name` | DuckDB table name. |
 | `tables[].snapshot` | Table content/schema identity used for scan cache isolation. |
 | `tables[].scanner` | Explicit file scanner configuration. |
@@ -60,7 +60,7 @@ A catalog publication sends one complete snapshot.
 | `views[].name` | DuckDB view name. |
 | `views[].query` | One `SELECT` statement defining the view. |
 
-Table and view names share one case-insensitive namespace within a schema. A schema in format 1 may contain tables, views, or both. View columns and types are derived by DuckDB when it binds the query, so view metadata does not include `columns`.
+Table and view names share one case-insensitive namespace within a schema. A schema may contain tables, views, or both. View columns and types are derived by DuckDB when it binds the query, so view metadata does not include `columns`.
 
 ### Columns
 
@@ -184,7 +184,7 @@ Input is copied at call time and processed in the same queue as complete publica
 
 ### `catalog.replaceView(schemaName, view)`
 
-Replaces the complete definition of an existing view in a format 1 snapshot. The view contains exactly `name` and `query`. Schema and view names are matched case-insensitively, preserving their existing spelling. Use `publishSnapshot()` to add, remove, or rename views.
+Replaces the complete definition of an existing view. The view contains exactly `name` and `query`. Schema and view names are matched case-insensitively, preserving their existing spelling. Use `publishSnapshot()` to add, remove, or rename views.
 
 Input is copied at call time and processed in the same queue as complete publications and table replacements. Success atomically updates the target view and advances the internal generation. Returns `Promise<void>`.
 
@@ -223,7 +223,6 @@ DuckDB queries report `RC_JSON_SCHEMA_MISMATCH` when `read_json` does not produc
 - The host application must provide a DuckDB-Wasm version and a matching `wasm_eh` catalog extension binary.
 - The extension build uses the DuckDB commit and Emscripten versions specified in `versions.lock`; these build inputs are separate from the DuckDB-Wasm version selected by the host application.
 - Read-only catalog; DuckDB-side catalog mutation is rejected.
-- `format_version: 1` supports tables and views.
 - Parquet, CSV, JSON, and XLSX are supported scanners.
 - Scanner options are limited to the documented allowlists.
 - The host must provide complete column metadata; schema inference is not performed by the catalog.

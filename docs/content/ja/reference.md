@@ -47,11 +47,11 @@ Catalog publication では catalog 全体の complete snapshot を送ります�
 
 | Field | 意味 |
 | --- | --- |
-| `format_version` | Snapshot schema version。Table と view の両方で `1` を使う。 |
+| `format_version` | Snapshot schema version（`1`）。 |
 | `schemas` | アプリケーションが publish する schema 全体。 |
 | `schemas[].name` | DuckDB schema 名。 |
 | `schemas[].tables` | Schema に含まれる table。 |
-| `schemas[].views` | Schema に含まれる view。`format_version: 1` で利用可能。 |
+| `schemas[].views` | Schema に含まれる view。 |
 | `tables[].name` | DuckDB table 名。 |
 | `tables[].snapshot` | Scan cache を分離するための table content/schema identity。 |
 | `tables[].scanner` | 明示的な file scanner configuration。 |
@@ -60,7 +60,7 @@ Catalog publication では catalog 全体の complete snapshot を送ります�
 | `views[].name` | DuckDB view 名。 |
 | `views[].query` | View を定義する単一の `SELECT` statement。 |
 
-同じ schema 内の table 名と view 名は、大文字・小文字を区別しない共通の namespace を使います。Format 1 の schema には table、view、またはその両方を含められます。View の column と型は query の bind 時に DuckDB が導出するため、view metadata に `columns` はありません。
+同じ schema 内の table 名と view 名は、大文字・小文字を区別しない共通の namespace を使います。Schema には table、view、またはその両方を含められます。View の column と型は query の bind 時に DuckDB が導出するため、view metadata に `columns` はありません。
 
 ### Column
 
@@ -184,7 +184,7 @@ Controller の lifecycle state です。正常に cleanup された場合の ter
 
 ### `catalog.replaceView(schemaName, view)`
 
-Format 1 snapshot にある既存 view の定義全体を置換します。View は `name` と `query` だけを持ちます。Schema 名と view 名は大文字・小文字を区別せずに照合し、既存の表記を維持します。View の追加、削除、名前変更には `publishSnapshot()` を使ってください。
+既存 view の定義全体を置換します。View は `name` と `query` だけを持ちます。Schema 名と view 名は大文字・小文字を区別せずに照合し、既存の表記を維持します。View の追加、削除、名前変更には `publishSnapshot()` を使ってください。
 
 入力は呼び出し時に複製され、全体置換や単一テーブル置換と共通のキューで処理されます。成功すると対象 view だけを原子的に更新し、内部世代を進めます。戻り値は `Promise<void>` です。
 
@@ -223,7 +223,6 @@ Snapshot validation では Worker / extension から追加の catalog-specific c
 - ホストアプリケーションは DuckDB-Wasm version と、それに対応する `wasm_eh` catalog extension binary を用意する必要があります。
 - Extension build では、`versions.lock` に指定された DuckDB commit と Emscripten version を使用します。これはホストアプリケーションが選択する DuckDB-Wasm version とは別の build input です。
 - Read-only catalog。DuckDB 側からの catalog mutation は拒否される。
-- `format_version: 1` は table と view をサポートする。
 - ScannerはParquet、CSV、JSON、XLSXに対応します。
 - Scanner optionはドキュメントに記載したものだけ指定できます。
 - Host が完全な column metadata を与える必要があり、catalog 自体は schema inference を行わない。
