@@ -14,7 +14,7 @@ description: in-memory catalog の publish、update、query、運用でよく使
 ```js
 function toCatalogSnapshot(datasets) {
   return {
-    format_version: 2,
+    format_version: 1,
     schemas: [
       {
         name: 'main',
@@ -23,7 +23,7 @@ function toCatalogSnapshot(datasets) {
           snapshot: dataset.contentVersion,
           scanner: { type: 'parquet', options: {} },
           columns: dataset.columns,
-          files: dataset.files.map((file) => ({ uri: file.url })),
+          files: dataset.files.map((file) => file.url),
         })),
       },
     ],
@@ -65,11 +65,11 @@ Schema 名と table の `name` で対象を特定します。対象が存在し�
 
 ## View を publish・更新する
 
-`format_version: 3` を使い、各 view を名前と単一の `SELECT` query で定義します。
+`format_version: 1` を使い、各 view を名前と単一の `SELECT` query で定義します。
 
 ```js
 const snapshot = {
-  format_version: 3,
+  format_version: 1,
   schemas: [{
     name: 'main',
     tables,
@@ -117,7 +117,7 @@ Catalog の mutation statement は拒否されます。メタデータの author
 
 ## Remote file を使う
 
-`files[].uri`は場所だけを表し、形式は表しません。HTTP(S)ファイルを使う場合は、そのファイルにアクセスできるようDuckDB-Wasmのfilesystemを設定します。Parquet、CSV、JSON、XLSXに対応しており、`table.scanner`で明示的に選択します。Scanner optionは[Scanner](./scanners.md)を参照してください。
+`files`の各文字列は場所だけを表し、形式は表しません。HTTP(S)ファイルを使う場合は、そのファイルにアクセスできるようDuckDB-Wasmのfilesystemを設定します。Parquet、CSV、JSON、XLSXに対応しており、`table.scanner`で明示的に選択します。Scanner optionは[Scanner](./scanners.md)を参照してください。
 
 Extension は metadata 上の URI を変更せず保持し、DuckDB の scan 用には table snapshot を含む内部 URI を生成します。URL fragment は HTTP request には送られないため、gateway や Service Worker には元の base URI が届きます。
 

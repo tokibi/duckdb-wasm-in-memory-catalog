@@ -72,10 +72,6 @@
     nullable: boolean;
   };
 
-  type CatalogFile = {
-    uri: string;
-  };
-
   type CatalogScanner = {
     type: string;
     options: Record<string, unknown>;
@@ -86,7 +82,7 @@
     snapshot: string;
     scanner: CatalogScanner;
     columns: CatalogColumn[];
-    files: CatalogFile[];
+    files: string[];
   };
 
   type CatalogView = {
@@ -109,7 +105,7 @@
   };
 
   type CatalogSnapshot = {
-    format_version: 2 | 3;
+    format_version: 1;
     schemas: CatalogSchemaMetadata[];
   };
 
@@ -220,11 +216,11 @@
           const replacement = deepFreeze({ ...candidate, name: previousTable.name });
           const tables = schema.metadata.tables.slice();
           tables[schema.tablePositions.get(tableKey)] = replacement;
-          const metadata = deepFreeze({ name: schema.metadata.name, tables });
-          const replacementMetadata =
-            current.snapshot.format_version === 3
-              ? deepFreeze({ name: schema.metadata.name, tables, views: schema.metadata.views })
-              : metadata;
+          const replacementMetadata = deepFreeze({
+            name: schema.metadata.name,
+            tables,
+            ...(schema.metadata.views === undefined ? {} : { views: schema.metadata.views }),
+          });
           const tableIndex = new Map(schema.tables);
           tableIndex.set(tableKey, replacement);
           const replacementSchema = Object.freeze({
@@ -311,7 +307,7 @@
 
           const schemas = current.snapshot.schemas.slice();
           schemas[current.schemaPositions.get(indexKey(schema.metadata.name))] = metadata;
-          const snapshot = makeSnapshot(3, schemas);
+          const snapshot = makeSnapshot(1, schemas);
           const schemaIndex = new Map(current.schemas);
           schemaIndex.set(indexKey(schema.metadata.name), replacementSchema);
 
@@ -437,10 +433,10 @@
 
   function normalizeSnapshot(input) {
     if (!isRecord(input)) invalid("snapshot must be an object");
-    if (input.format_version !== 2 && input.format_version !== 3) {
+    if (input.format_version !== 1) {
       throw new InMemoryCatalogError(
         "RC_METADATA_VERSION",
-        "Catalog snapshot format_version must be 2 or 3",
+        "Catalog snapshot format_version must be 1",
       );
     }
     if (!Array.isArray(input.schemas) || input.schemas.length === 0) {
@@ -453,23 +449,11 @@
       const path = `schemas[${schemaIndexValue}]`;
       if (!isRecord(schema)) invalid(`${path} must be an object`);
       const name = uniqueName(schema.name, schemaNames, `${path}.name`);
-      if (
-        input.format_version === 2 &&
-        (!Array.isArray(schema.tables) || schema.tables.length === 0)
-      ) {
-        invalid(`schema ${name} must contain at least one table`);
-      }
-      if (input.format_version === 2 && schema.views !== undefined) {
-        throw new InMemoryCatalogError(
-          "RC_METADATA_VERSION",
-          "Catalog views require snapshot format_version 3",
-        );
-      }
       const rawTables = schema.tables === undefined ? [] : schema.tables;
       const rawViews = schema.views === undefined ? [] : schema.views;
       if (!Array.isArray(rawTables)) invalid(`schema ${name}.tables must be an array`);
       if (!Array.isArray(rawViews)) invalid(`schema ${name}.views must be an array`);
-      if (input.format_version === 3 && rawTables.length + rawViews.length === 0) {
+      if (rawTables.length + rawViews.length === 0) {
         invalid(`schema ${name} must contain at least one table or view`);
       }
 
@@ -494,10 +478,11 @@
         viewPositions.set(indexKey(normalized.name), viewIndexValue);
         return normalized;
       });
-      const metadata =
-        input.format_version === 3
-          ? deepFreeze({ name, tables, views })
-          : deepFreeze({ name, tables });
+      const metadata = deepFreeze({
+        name,
+        tables,
+        ...(schema.views === undefined ? {} : { views }),
+      });
       schemaIndex.set(
         indexKey(name),
         Object.freeze({
@@ -553,15 +538,12 @@
     });
 
     const uris = new Set();
-    const files = input.files.map((file, index) => {
+    const files = input.files.map((uri, index) => {
       const filePath = `${path}.files[${index}]`;
-      if (!isRecord(file) || !hasExactKeys(file, ["uri"])) {
-        invalid(`${filePath} must contain only uri`);
-      }
-      const uri = requireName(file.uri, `${filePath}.uri`);
-      if (uris.has(uri)) invalid(`${filePath}.uri is duplicated`);
-      uris.add(uri);
-      return deepFreeze({ uri });
+      const normalizedURI = requireName(uri, filePath);
+      if (uris.has(normalizedURI)) invalid(`${filePath} is duplicated`);
+      uris.add(normalizedURI);
+      return normalizedURI;
     });
 
     return deepFreeze({ name, snapshot, scanner, columns, files });

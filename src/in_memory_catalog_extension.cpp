@@ -51,10 +51,6 @@ struct CatalogColumnMetadata {
 	bool nullable;
 };
 
-struct CatalogFileMetadata {
-	string uri;
-};
-
 struct CatalogScannerDescriptor {
 	string type;
 	named_parameter_map_t options;
@@ -68,7 +64,7 @@ struct CatalogTableDescriptor {
 	string snapshot_id;
 	CatalogScannerDescriptor scanner;
 	vector<CatalogColumnMetadata> columns;
-	vector<CatalogFileMetadata> files;
+	vector<string> files;
 };
 
 struct CatalogViewDescriptor {
@@ -572,15 +568,14 @@ static shared_ptr<const CatalogTableDescriptor> DecodeProductionDescriptor(const
 	size_t file_index, file_count;
 	yyjson_val *file;
 	yyjson_arr_foreach(files, file_index, file_count, file) {
-		if (!yyjson_is_obj(file) || yyjson_obj_size(file) != 1) {
+		if (!yyjson_is_str(file)) {
 			DescriptorInvalid();
 		}
-		CatalogFileMetadata catalog_file {JSONString(file, "uri")};
-		if (catalog_file.uri.empty() || catalog_file.uri.find('\0') != string::npos ||
-		    !uris.insert(catalog_file.uri).second) {
+		string uri(unsafe_yyjson_get_str(file), unsafe_yyjson_get_len(file));
+		if (uri.empty() || uri.find('\0') != string::npos || !uris.insert(uri).second) {
 			DescriptorInvalid();
 		}
-		descriptor->files.push_back(std::move(catalog_file));
+		descriptor->files.push_back(std::move(uri));
 	}
 	if (descriptor->scanner.type == "xlsx" && descriptor->files.size() != 1) {
 		DescriptorInvalid();
@@ -1053,8 +1048,8 @@ public:
 
 		vector<Value> files;
 		files.reserve(descriptor->files.size());
-		for (const auto &file : descriptor->files) {
-			files.push_back(Value(in_memory_catalog::MakeDuckDBScanURI(file.uri, descriptor->snapshot_id)));
+		for (const auto &uri : descriptor->files) {
+			files.push_back(Value(in_memory_catalog::MakeDuckDBScanURI(uri, descriptor->snapshot_id)));
 		}
 		named_parameter_map_t named_parameters;
 		if (scanner.type == "parquet") {

@@ -58,7 +58,7 @@ function defaultCatalog(metadata, fileUrl) {
   const jsonFileUrl = new URL("./data/demo-events.json", rootUrl).href;
   const xlsxFileUrl = new URL("./data/demo.xlsx", rootUrl).href;
   return {
-    format_version: 3,
+    format_version: 1,
     schemas: [
       {
         name: "analytics",
@@ -71,7 +71,7 @@ function defaultCatalog(metadata, fileUrl) {
               options: {},
             },
             columns: metadata.columns,
-            files: [{ uri: fileUrl }],
+            files: [fileUrl],
           },
           {
             name: "events_csv",
@@ -85,7 +85,7 @@ function defaultCatalog(metadata, fileUrl) {
               { name: "category", type: "VARCHAR", nullable: false },
               { name: "value", type: "INTEGER", nullable: false },
             ],
-            files: [{ uri: csvFileUrl }],
+            files: [csvFileUrl],
           },
           {
             name: "events_json",
@@ -99,7 +99,7 @@ function defaultCatalog(metadata, fileUrl) {
               { name: "context", type: "STRUCT(browser VARCHAR, tags VARCHAR[])", nullable: true },
               { name: "payload", type: "JSON", nullable: true },
             ],
-            files: [{ uri: jsonFileUrl }],
+            files: [jsonFileUrl],
           },
           {
             name: "spreadsheet_xlsx",
@@ -113,7 +113,7 @@ function defaultCatalog(metadata, fileUrl) {
               { name: "HELLO", type: "VARCHAR", nullable: true },
               { name: "WORLD", type: "VARCHAR", nullable: true },
             ],
-            files: [{ uri: xlsxFileUrl }],
+            files: [xlsxFileUrl],
           },
         ],
         views: [

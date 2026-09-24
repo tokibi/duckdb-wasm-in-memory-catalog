@@ -10,7 +10,7 @@ const { InMemoryCatalogError, InMemoryCatalogMetadataStore } =
 
 function snapshot(uri = "https://example.test/table") {
   return {
-    format_version: 2,
+    format_version: 1,
     schemas: [
       {
         name: "main",
@@ -20,7 +20,7 @@ function snapshot(uri = "https://example.test/table") {
             snapshot: "snapshot-1",
             scanner: { type: "parquet", options: {} },
             columns: [{ name: "id", type: "BIGINT", nullable: false }],
-            files: [{ uri }],
+            files: [uri],
           },
         ],
       },
@@ -34,7 +34,7 @@ function table(name, snapshotId, uri) {
     snapshot: snapshotId,
     scanner: { type: "parquet", options: {} },
     columns: [{ name: "id", type: "BIGINT", nullable: false }],
-    files: [{ uri }],
+    files: [uri],
   };
 }
 
@@ -44,7 +44,7 @@ function view(name = "view1", query = "SELECT id FROM table1") {
 
 function viewSnapshot() {
   return {
-    format_version: 3,
+    format_version: 1,
     schemas: [
       {
         name: "main",
@@ -57,7 +57,7 @@ function viewSnapshot() {
 
 function multiTableSnapshot(suffix = "initial") {
   return {
-    format_version: 2,
+    format_version: 1,
     schemas: [
       {
         name: "main",
@@ -100,7 +100,7 @@ describe("InMemoryCatalogMetadataStore", () => {
     const updatedTable1 = store.lookupTable("workspace", "3", "main", "table1");
     assert.equal(updatedTable1.name, "table1");
     assert.equal(updatedTable1.snapshot, "table-update");
-    assert.equal(updatedTable1.files[0].uri, "https://example.test/table-update");
+    assert.equal(updatedTable1.files[0], "https://example.test/table-update");
     assert.deepEqual(
       store.listTables("workspace", "3", "main").find((entry) => entry.name === "table1").columns,
       [
@@ -151,12 +151,12 @@ describe("InMemoryCatalogMetadataStore", () => {
     const candidate = table("TaBlE1", "captured", "https://example.test/captured");
     const update = session.replaceCatalogTable("MAIN", candidate);
     candidate.snapshot = "mutated-after-submit";
-    candidate.files[0].uri = "https://example.test/mutated-after-submit";
+    candidate.files[0] = "https://example.test/mutated-after-submit";
     await update;
     assert.equal(store.currentRevision("workspace"), 2n);
     const captured = store.lookupTable("workspace", "2", "main", "table1");
     assert.equal(captured.snapshot, "captured");
-    assert.equal(captured.files[0].uri, "https://example.test/captured");
+    assert.equal(captured.files[0], "https://example.test/captured");
   });
 
   it("publishes scanner and URI metadata while keeping enumeration descriptors lightweight", async () => {
@@ -176,7 +176,7 @@ describe("InMemoryCatalogMetadataStore", () => {
     ]);
     const table = store.lookupTable("workspace", "1", "main", "table1");
     assert.deepEqual(table.scanner, { type: "parquet", options: {} });
-    assert.deepEqual(table.files, [{ uri: "https://example.test/table" }]);
+    assert.deepEqual(table.files, ["https://example.test/table"]);
     assert.doesNotMatch(
       JSON.stringify(store.listTables("workspace", "1", "main")),
       /uri|files|scanner/,
@@ -192,16 +192,13 @@ describe("InMemoryCatalogMetadataStore", () => {
     assert.deepEqual(store.listViews("workspace", "1", "main"), [view()]);
     assert.deepEqual(store.lookupView("workspace", "1", "main", "VIEW1"), view());
     assert.deepEqual(store.lookupTable("workspace", "1", "main", "table1").files, [
-      { uri: "https://example.test/table" },
+      "https://example.test/table",
     ]);
 
     const collision = viewSnapshot();
     collision.schemas[0].views[0].name = "TABLE1";
     await expectCode(() => session.replaceCatalogSnapshot(collision), "RC_METADATA_INVALID");
 
-    const legacy = snapshot();
-    legacy.schemas[0].views = [view()];
-    await expectCode(() => session.replaceCatalogSnapshot(legacy), "RC_METADATA_VERSION");
     assert.equal(store.currentRevision("workspace"), 1n);
   });
 
@@ -209,7 +206,7 @@ describe("InMemoryCatalogMetadataStore", () => {
     const store = new InMemoryCatalogMetadataStore();
     const session = store.openWorkspaceSession("workspace");
     const viewOnly = {
-      format_version: 3,
+      format_version: 1,
       schemas: [{ name: "main", views: [view("constant", "SELECT 1 AS value")] }],
     };
 
@@ -233,7 +230,7 @@ describe("InMemoryCatalogMetadataStore", () => {
     assert.equal(store.currentRevision("workspace"), 1n);
   });
 
-  it("replaces an existing view atomically and keeps the catalog on format version 3", async () => {
+  it("replaces an existing view atomically and keeps the catalog on format version 1", async () => {
     const store = new InMemoryCatalogMetadataStore();
     const session = store.openWorkspaceSession("workspace");
     await session.replaceCatalogSnapshot(viewSnapshot());
@@ -270,8 +267,8 @@ describe("InMemoryCatalogMetadataStore", () => {
     await session.replaceCatalogSnapshot(secondSnapshot);
     const secondTable = store.lookupTable("workspace", "2", "main", "table1");
 
-    assert.deepEqual(firstTable.files, [{ uri: "https://example.test/stable-file" }]);
-    assert.deepEqual(secondTable.files, [{ uri: "https://example.test/stable-file" }]);
+    assert.deepEqual(firstTable.files, ["https://example.test/stable-file"]);
+    assert.deepEqual(secondTable.files, ["https://example.test/stable-file"]);
     assert.equal(firstTable.snapshot, "snapshot-1");
     assert.equal(secondTable.snapshot, "snapshot-2");
   });
@@ -308,13 +305,13 @@ describe("InMemoryCatalogMetadataStore", () => {
     await expectCode(() => session.replaceCatalogSnapshot(invalid), "RC_METADATA_INVALID");
     assert.equal(store.currentRevision("workspace"), 1n);
     assert.equal(
-      store.lookupTable("workspace", "1", "main", "table1").files[0].uri,
+      store.lookupTable("workspace", "1", "main", "table1").files[0],
       "https://example.test/table",
     );
     await session.replaceCatalogSnapshot(snapshot("https://example.test/new"));
     assert.equal(store.currentRevision("workspace"), 2n);
     assert.equal(
-      store.lookupTable("workspace", "2", "main", "table1").files[0].uri,
+      store.lookupTable("workspace", "2", "main", "table1").files[0],
       "https://example.test/new",
     );
   });
@@ -486,15 +483,15 @@ describe("InMemoryCatalogMetadataStore", () => {
 
     const multiple = snapshot("https://example.test/table.xlsx");
     multiple.schemas[0].tables[0].scanner = { type: "xlsx", options: {} };
-    multiple.schemas[0].tables[0].files.push({ uri: "https://example.test/table-2.xlsx" });
+    multiple.schemas[0].tables[0].files.push("https://example.test/table-2.xlsx");
     await expectCode(() => session.replaceCatalogSnapshot(multiple), "RC_METADATA_INVALID");
   });
 
-  it("rejects the previous snapshot format instead of choosing a scanner implicitly", async () => {
+  it("rejects unsupported snapshot format versions", async () => {
     const store = new InMemoryCatalogMetadataStore();
     const session = store.openWorkspaceSession("workspace");
     const legacy = snapshot();
-    legacy.format_version = 1;
+    legacy.format_version = 2;
 
     await expectCode(() => session.replaceCatalogSnapshot(legacy), "RC_METADATA_VERSION");
   });
@@ -522,21 +519,30 @@ describe("InMemoryCatalogMetadataStore", () => {
     });
   });
 
-  it("rejects extra file metadata and duplicate URIs atomically", async () => {
+  it("rejects object file descriptors and duplicate URIs atomically", async () => {
     const store = new InMemoryCatalogMetadataStore();
     const session = store.openWorkspaceSession("workspace");
     const legacy = snapshot();
-    legacy.schemas[0].tables[0].files[0].hash = `sha256:${"a".repeat(64)}`;
+    legacy.schemas[0].tables[0].files[0] = { uri: "https://example.test/table" };
 
     await expectCode(() => session.replaceCatalogSnapshot(legacy), "RC_METADATA_INVALID");
     assert.equal(store.hasWorkspace("workspace"), true);
     assert.equal(store.currentRevision("workspace"), undefined);
 
     const duplicate = snapshot();
-    duplicate.schemas[0].tables[0].files.push({
-      uri: "https://example.test/table",
-    });
+    duplicate.schemas[0].tables[0].files.push("https://example.test/table");
     await expectCode(() => session.replaceCatalogSnapshot(duplicate), "RC_METADATA_INVALID");
+  });
+
+  it("requires each file URI string to be non-empty and contain no NUL", async () => {
+    const store = new InMemoryCatalogMetadataStore();
+    const session = store.openWorkspaceSession("workspace");
+
+    for (const uri of ["", "https://example.test/with\0nul", null, 42]) {
+      const candidate = snapshot();
+      candidate.schemas[0].tables[0].files[0] = uri;
+      await expectCode(() => session.replaceCatalogSnapshot(candidate), "RC_METADATA_INVALID");
+    }
   });
 
   it("enforces one writer and releases all workspace state on revisionless drop", async () => {

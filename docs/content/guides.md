@@ -14,7 +14,7 @@ A typical application keeps metadata such as dataset names, columns, file locati
 ```js
 function toCatalogSnapshot(datasets) {
   return {
-    format_version: 2,
+    format_version: 1,
     schemas: [
       {
         name: 'main',
@@ -23,7 +23,7 @@ function toCatalogSnapshot(datasets) {
           snapshot: dataset.contentVersion,
           scanner: { type: 'parquet', options: {} },
           columns: dataset.columns,
-          files: dataset.files.map((file) => ({ uri: file.url })),
+          files: dataset.files.map((file) => file.url),
         })),
       },
     ],
@@ -65,11 +65,11 @@ The schema name and table's `name` identify the target. A missing target is an e
 
 ## Publish and update views
 
-Use `format_version: 3` and define each view with a name and one `SELECT` query:
+Use `format_version: 1` and define each view with a name and one `SELECT` query:
 
 ```js
 const snapshot = {
-  format_version: 3,
+  format_version: 1,
   schemas: [{
     name: 'main',
     tables,
@@ -117,7 +117,7 @@ Catalog mutation statements are rejected. The host application remains the metad
 
 ## Use remote files
 
-`files[].uri` is a location, not a format declaration. For HTTP(S) files, configure DuckDB-Wasm's filesystem so it can reach the remote resource. The supported scanners are Parquet, CSV, JSON, and XLSX; select one explicitly in `table.scanner`. See [Scanners](./scanners.md) for scanner options.
+Each string in `files` is a location, not a format declaration. For HTTP(S) files, configure DuckDB-Wasm's filesystem so it can reach the remote resource. The supported scanners are Parquet, CSV, JSON, and XLSX; select one explicitly in `table.scanner`. See [Scanners](./scanners.md) for scanner options.
 
 The extension keeps the metadata URI unchanged but derives a DuckDB-facing scan URI using the table snapshot. URL fragments are not sent to the HTTP server, so gateways and Service Workers continue to receive the original base URI.
 

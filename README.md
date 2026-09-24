@@ -35,7 +35,7 @@ The user documentation is organized as:
 - **Getting started** — initialize DuckDB-Wasm and attach the first catalog.
 - **Guides** — publish, update, query, and operate catalogs.
 - **Concepts** — complete snapshots, table snapshots, scanners, cache identity, and runtime ownership.
-- **Reference** — snapshot format, JavaScript API, errors, migration notes, limitations, and development commands.
+- **Reference** — snapshot format, JavaScript API, errors, limitations, and development commands.
 
 See the [English documentation](https://tokibi.github.io/duckdb-wasm-in-memory-catalog/docs/) or [日本語ドキュメント](https://tokibi.github.io/duckdb-wasm-in-memory-catalog/docs/ja/).
 

@@ -1,6 +1,6 @@
 ---
 title: Reference
-description: Snapshot schema, JavaScript API, errors, migration notes, and current limitations.
+description: Snapshot schema, JavaScript API, errors, and current limitations.
 ---
 
 # Reference
@@ -11,7 +11,7 @@ A catalog publication sends one complete snapshot.
 
 ```js
 {
-  format_version: 3,
+  format_version: 1,
   schemas: [
     {
       name: 'analytics',
@@ -28,7 +28,7 @@ A catalog publication sends one complete snapshot.
             { name: 'category', type: 'VARCHAR', nullable: true },
           ],
           files: [
-            { uri: 'https://example.test/files/events-r42' },
+            'https://example.test/files/events-r42',
           ],
         },
       ],
@@ -47,20 +47,20 @@ A catalog publication sends one complete snapshot.
 
 | Field | Meaning |
 | --- | --- |
-| `format_version` | Snapshot schema version. Use `2` for tables only or `3` for tables and views. |
+| `format_version` | Snapshot schema version. Use `1` for tables and views. |
 | `schemas` | Complete set of schemas published by the application. |
 | `schemas[].name` | DuckDB schema name. |
 | `schemas[].tables` | Tables in the schema. |
-| `schemas[].views` | Views in the schema. Available with `format_version: 3`. |
+| `schemas[].views` | Views in the schema. Available with `format_version: 1`. |
 | `tables[].name` | DuckDB table name. |
 | `tables[].snapshot` | Table content/schema identity used for scan cache isolation. |
 | `tables[].scanner` | Explicit file scanner configuration. |
 | `tables[].columns` | Published logical columns in DuckDB order. |
-| `tables[].files` | Files forming the table. |
+| `tables[].files` | URI strings for files forming the table. |
 | `views[].name` | DuckDB view name. |
 | `views[].query` | One `SELECT` statement defining the view. |
 
-Table and view names share one case-insensitive namespace within a schema. A schema in format 3 may contain tables, views, or both. View columns and types are derived by DuckDB when it binds the query, so view metadata does not include `columns`.
+Table and view names share one case-insensitive namespace within a schema. A schema in format 1 may contain tables, views, or both. View columns and types are derived by DuckDB when it binds the query, so view metadata does not include `columns`.
 
 ### Columns
 
@@ -103,10 +103,10 @@ See [Scanners](./scanners.md) for CSV defaults, validation boundaries, and the c
 
 ### Files
 
-Each file descriptor currently contains a URI:
+Each `files` entry is a URI string:
 
 ```js
-{ uri: 'https://example.test/data/events.parquet' }
+'https://example.test/data/events.parquet'
 ```
 
 The URI identifies location only. File format is declared by `scanner`.
@@ -184,7 +184,7 @@ Input is copied at call time and processed in the same queue as complete publica
 
 ### `catalog.replaceView(schemaName, view)`
 
-Replaces the complete definition of an existing view in a format 3 snapshot. The view contains exactly `name` and `query`. Schema and view names are matched case-insensitively, preserving their existing spelling. Use `publishSnapshot()` to add, remove, or rename views.
+Replaces the complete definition of an existing view in a format 1 snapshot. The view contains exactly `name` and `query`. Schema and view names are matched case-insensitively, preserving their existing spelling. Use `publishSnapshot()` to add, remove, or rename views.
 
 Input is copied at call time and processed in the same queue as complete publications and table replacements. Success atomically updates the target view and advances the internal generation. Returns `Promise<void>`.
 
@@ -217,17 +217,13 @@ Snapshot validation can return additional catalog-specific codes from the Worker
 
 DuckDB queries report `RC_JSON_SCHEMA_MISMATCH` when `read_json` does not produce the published columns, `RC_XLSX_SCHEMA_MISMATCH` when `read_xlsx` does not produce the published column names, `RC_CATALOG_VIEW_INVALID` when a view cannot be parsed or bound, and `RC_CATALOG_VIEW_CYCLE` when view dependencies are circular. These codes appear in the DuckDB query error message rather than as `InMemoryCatalogControllerError.code`.
 
-## Migration from revision-based publications
-
-Remove `initialRevision` from `initialize(db, worker, options, initialRevision, initialSnapshot)`, pass only the snapshot to `publishSnapshot(snapshot)`, and remove reads of `catalog.currentRevision`. Keep each table's `snapshot` value for bytes, physical schema, and cache identity. The catalog generation is now private bridge state.
-
 ## Current limitations
 
 - Experimental public API.
 - The host application must provide a DuckDB-Wasm version and a matching `wasm_eh` catalog extension binary.
 - The extension build uses the DuckDB commit and Emscripten versions specified in `versions.lock`; these build inputs are separate from the DuckDB-Wasm version selected by the host application.
 - Read-only catalog; DuckDB-side catalog mutation is rejected.
-- `format_version: 2` supports tables; `format_version: 3` adds views.
+- `format_version: 1` supports tables and views.
 - Parquet, CSV, JSON, and XLSX are supported scanners.
 - Scanner options are limited to the documented allowlists.
 - The host must provide complete column metadata; schema inference is not performed by the catalog.
