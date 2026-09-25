@@ -13,7 +13,7 @@ const { createInMemoryCatalogWorkerRuntime } = globalThis.DuckDBInMemoryCatalogW
 
 function snapshot(uri = "https://example.test/table") {
   return {
-    format_version: 2,
+    format_version: 1,
     schemas: [
       {
         name: "main",
@@ -23,7 +23,7 @@ function snapshot(uri = "https://example.test/table") {
             snapshot: "snapshot-1",
             scanner: { type: "parquet", options: {} },
             columns: [{ name: "id", type: "BIGINT", nullable: false }],
-            files: [{ uri }],
+            files: [uri],
           },
         ],
       },
@@ -33,7 +33,7 @@ function snapshot(uri = "https://example.test/table") {
 
 function viewSnapshot() {
   return {
-    format_version: 3,
+    format_version: 1,
     schemas: [
       {
         name: "main",
@@ -43,7 +43,7 @@ function viewSnapshot() {
             snapshot: "snapshot-1",
             scanner: { type: "parquet", options: {} },
             columns: [{ name: "id", type: "BIGINT", nullable: false }],
-            files: [{ uri: "https://example.test/table" }],
+            files: ["https://example.test/table"],
           },
         ],
         views: [{ name: "view1", query: "SELECT id FROM table1" }],
@@ -357,13 +357,13 @@ describe("InMemoryCatalogController", () => {
       const fullPublication = controller.publishSnapshot(firstFull);
       const replacement = controller.replaceTable("MAIN", candidate);
       candidate.snapshot = "mutated-after-submit";
-      candidate.files[0].uri = "https://example.test/mutated-after-submit";
+      candidate.files[0] = "https://example.test/mutated-after-submit";
       await Promise.all([fullPublication, replacement]);
 
       assert.equal(store.currentRevision("workspace"), 3n);
       const updated = store.lookupTable("workspace", "3", "main", "table1");
       assert.equal(updated.snapshot, "snapshot-update");
-      assert.equal(updated.files[0].uri, "https://example.test/table-update");
+      assert.equal(updated.files[0], "https://example.test/table-update");
 
       const replacementBeforeFull = snapshot("https://example.test/table-before-full").schemas[0]
         .tables[0];
@@ -377,7 +377,7 @@ describe("InMemoryCatalogController", () => {
       assert.equal(store.currentRevision("workspace"), 5n);
       const finalTable = store.lookupTable("workspace", "5", "main", "table1");
       assert.equal(finalTable.snapshot, "snapshot-final-full");
-      assert.equal(finalTable.files[0].uri, "https://example.test/final-full");
+      assert.equal(finalTable.files[0], "https://example.test/final-full");
     } finally {
       await controller.close();
     }

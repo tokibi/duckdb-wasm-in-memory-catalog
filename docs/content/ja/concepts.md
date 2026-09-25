@@ -27,7 +27,7 @@ DuckDB のメタデータ更新検知と読み取り時の世代照合には、W
 
 ## View
 
-`format_version: 3` では table とともに view を publish できます。View は名前と単一の `SELECT` query を持ち、利用時に DuckDB が query を bind して column と型を導出します。View から catalog の table や別の view を参照できます。不正な query や view の循環参照は query error になり、publish 済み snapshot は変更されません。
+Table とともに view を publish できます。View は名前と単一の `SELECT` query を持ち、利用時に DuckDB が query を bind して column と型を導出します。View から catalog の table や別の view を参照できます。不正な query や view の循環参照は query error になり、publish 済み snapshot は変更されません。
 
 内部 catalog generation は bind 済み view entry の無効化にも使われます。`publishSnapshot()`、`replaceTable()`、`replaceView()` の成功後、次の query では現在の定義から view が bind されます。
 
@@ -44,12 +44,12 @@ Table は次の3つの関心事を分離します。
 ```text
 columns      DuckDB からどう見えるか
 scanner      file をどう解釈するか
-files[].uri  file がどこにあるか
+files        file がどこにあるか
 ```
 
 1つの table を構成する file は同じ read configuration を共有する前提なので、scanner は table 単位です。
 
-`format_version: 2` では scanner の明示指定が必須です。Catalog は filename、extension、URI から scanner を選びません。
+各 table で scanner の明示指定が必須です。Catalog は filename、extension、URI から scanner を選びません。
 
 現在はParquet、CSV、JSON、XLSXに対応しています。Scannerの設定と指定できるoptionは[Scanner](./scanners.md)を参照してください。
 

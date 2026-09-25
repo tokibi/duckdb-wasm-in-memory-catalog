@@ -64,7 +64,7 @@ A snapshot is the complete catalog state that the Worker publishes atomically.
 
 ```js
 const snapshot = {
-  format_version: 2,
+  format_version: 1,
   schemas: [
     {
       name: 'analytics',
@@ -81,7 +81,7 @@ const snapshot = {
             { name: 'category', type: 'VARCHAR', nullable: true },
           ],
           files: [
-            { uri: 'https://example.com/events.parquet' },
+            'https://example.com/events.parquet',
           ],
         },
       ],

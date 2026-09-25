@@ -1,6 +1,6 @@
 ---
 title: Reference
-description: Snapshot schema、JavaScript API、error、migration note、現在の制約をまとめます。
+description: Snapshot schema、JavaScript API、error、現在の制約をまとめます。
 ---
 
 # Reference
@@ -11,7 +11,7 @@ Catalog publication では catalog 全体の complete snapshot を送ります�
 
 ```js
 {
-  format_version: 3,
+  format_version: 1,
   schemas: [
     {
       name: 'analytics',
@@ -28,7 +28,7 @@ Catalog publication では catalog 全体の complete snapshot を送ります�
             { name: 'category', type: 'VARCHAR', nullable: true },
           ],
           files: [
-            { uri: 'https://example.test/files/events-r42' },
+            'https://example.test/files/events-r42',
           ],
         },
       ],
@@ -47,20 +47,20 @@ Catalog publication では catalog 全体の complete snapshot を送ります�
 
 | Field | 意味 |
 | --- | --- |
-| `format_version` | Snapshot schema version。Table のみなら `2`、view も含めるなら `3` を使う。 |
+| `format_version` | Snapshot schema version（`1`）。 |
 | `schemas` | アプリケーションが publish する schema 全体。 |
 | `schemas[].name` | DuckDB schema 名。 |
 | `schemas[].tables` | Schema に含まれる table。 |
-| `schemas[].views` | Schema に含まれる view。`format_version: 3` で利用可能。 |
+| `schemas[].views` | Schema に含まれる view。 |
 | `tables[].name` | DuckDB table 名。 |
 | `tables[].snapshot` | Scan cache を分離するための table content/schema identity。 |
 | `tables[].scanner` | 明示的な file scanner configuration。 |
 | `tables[].columns` | DuckDB 上の順序で定義した column。 |
-| `tables[].files` | Table を構成する file。 |
+| `tables[].files` | Table を構成する file の URI 文字列。 |
 | `views[].name` | DuckDB view 名。 |
 | `views[].query` | View を定義する単一の `SELECT` statement。 |
 
-同じ schema 内の table 名と view 名は、大文字・小文字を区別しない共通の namespace を使います。Format 3 の schema には table、view、またはその両方を含められます。View の column と型は query の bind 時に DuckDB が導出するため、view metadata に `columns` はありません。
+同じ schema 内の table 名と view 名は、大文字・小文字を区別しない共通の namespace を使います。Schema には table、view、またはその両方を含められます。View の column と型は query の bind 時に DuckDB が導出するため、view metadata に `columns` はありません。
 
 ### Column
 
@@ -103,10 +103,10 @@ CSV の既定値、Catalog と DuckDB の検証境界、受け付ける option �
 
 ### File
 
-各 file descriptor は現在 URI を持ちます。
+`files` の各要素は URI 文字列です。
 
 ```js
-{ uri: 'https://example.test/data/events.parquet' }
+'https://example.test/data/events.parquet'
 ```
 
 URI は location のみを表します。File format は `scanner` で指定します。
@@ -184,7 +184,7 @@ Controller の lifecycle state です。正常に cleanup された場合の ter
 
 ### `catalog.replaceView(schemaName, view)`
 
-Format 3 snapshot にある既存 view の定義全体を置換します。View は `name` と `query` だけを持ちます。Schema 名と view 名は大文字・小文字を区別せずに照合し、既存の表記を維持します。View の追加、削除、名前変更には `publishSnapshot()` を使ってください。
+既存 view の定義全体を置換します。View は `name` と `query` だけを持ちます。Schema 名と view 名は大文字・小文字を区別せずに照合し、既存の表記を維持します。View の追加、削除、名前変更には `publishSnapshot()` を使ってください。
 
 入力は呼び出し時に複製され、全体置換や単一テーブル置換と共通のキューで処理されます。成功すると対象 view だけを原子的に更新し、内部世代を進めます。戻り値は `Promise<void>` です。
 
@@ -217,17 +217,12 @@ Snapshot validation では Worker / extension から追加の catalog-specific c
 
 `read_json`の出力が公開した列と一致しない場合は`RC_JSON_SCHEMA_MISMATCH`、`read_xlsx`の列名が一致しない場合は`RC_XLSX_SCHEMA_MISMATCH`、viewをparseまたはbindできない場合は`RC_CATALOG_VIEW_INVALID`、viewの依存関係が循環している場合は`RC_CATALOG_VIEW_CYCLE`を報告します。これらは`InMemoryCatalogControllerError.code`ではなく、DuckDB queryのerror messageに含まれます。
 
-## Revision-based publication からの移行
-
-`initialize(db, worker, options, initialRevision, initialSnapshot)` から `initialRevision` を削除し、`publishSnapshot(snapshot)` には snapshot だけを渡してください。`catalog.currentRevision` の参照も削除します。Bytes、physical schema、cache identity のために各 table の `snapshot` は引き続き管理します。Catalog generation は private な bridge state です。
-
 ## 現在の制約
 
 - Public API は experimental。
 - ホストアプリケーションは DuckDB-Wasm version と、それに対応する `wasm_eh` catalog extension binary を用意する必要があります。
 - Extension build では、`versions.lock` に指定された DuckDB commit と Emscripten version を使用します。これはホストアプリケーションが選択する DuckDB-Wasm version とは別の build input です。
 - Read-only catalog。DuckDB 側からの catalog mutation は拒否される。
-- `format_version: 2` は table、`format_version: 3` は view もサポートする。
 - ScannerはParquet、CSV、JSON、XLSXに対応します。
 - Scanner optionはドキュメントに記載したものだけ指定できます。
 - Host が完全な column metadata を与える必要があり、catalog 自体は schema inference を行わない。

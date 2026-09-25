@@ -25,7 +25,7 @@ Use this project when your application already has a declarative dataset model a
 2. [Guides](./guides.md) — publish, update, query, and operate catalogs.
 3. [Concepts](./concepts.md) — understand complete snapshots, table snapshots, scanners, cache identity, and runtime ownership.
 4. [Scanners](./scanners.md) — configure the supported Parquet, CSV, JSON, and XLSX scanners and their options.
-5. [Reference](./reference.md) — snapshot format, JavaScript API, errors, migration notes, limitations, and development commands.
+5. [Reference](./reference.md) — snapshot format, JavaScript API, errors, limitations, and development commands.
 
 The [live demo](../) runs the same catalog implementation in the browser with an editable snapshot and SQL query.
 

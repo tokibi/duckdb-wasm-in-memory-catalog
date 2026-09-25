@@ -28,7 +28,7 @@ describe("GitHub Pages demo view examples", () => {
   });
 
   it("starts with a catalog view backed by the nation table", () => {
-    assert.match(appSource, /format_version: 3/);
+    assert.match(appSource, /format_version: 1/);
     assert.match(appSource, /name: ["']nation_counts_by_region["']/);
     assert.match(appSource, /FROM nation/);
     assert.match(appSource, /FROM demo\.analytics\.nation_counts_by_region;/);

@@ -11,7 +11,7 @@ const { createInMemoryCatalogWorkerRuntime } = globalThis.DuckDBInMemoryCatalogW
 
 function snapshot(uri = "https://example.test/table") {
   return {
-    format_version: 2,
+    format_version: 1,
     schemas: [
       {
         name: "main",
@@ -21,7 +21,7 @@ function snapshot(uri = "https://example.test/table") {
             snapshot: "snapshot-1",
             scanner: { type: "parquet", options: {} },
             columns: [{ name: "id", type: "BIGINT", nullable: false }],
-            files: [{ uri }],
+            files: [uri],
           },
         ],
       },
@@ -31,7 +31,7 @@ function snapshot(uri = "https://example.test/table") {
 
 function viewSnapshot() {
   return {
-    format_version: 3,
+    format_version: 1,
     schemas: [
       {
         name: "main",
@@ -41,7 +41,7 @@ function viewSnapshot() {
             snapshot: "snapshot-1",
             scanner: { type: "parquet", options: {} },
             columns: [{ name: "id", type: "BIGINT", nullable: false }],
-            files: [{ uri: "https://example.test/table" }],
+            files: ["https://example.test/table"],
           },
         ],
         views: [{ name: "view1", query: "SELECT id FROM table1" }],
@@ -97,7 +97,7 @@ describe("In-Memory Catalog Worker runtime", () => {
     assert.equal(runtime.bridge.currentRevision("workspace"), "1");
     assert.deepEqual(
       JSON.parse(runtime.bridge.lookupTable("workspace", "1", "main", "table1")).files,
-      [{ uri: "https://example.test/table" }],
+      ["https://example.test/table"],
     );
     assert.deepEqual(
       JSON.parse(runtime.bridge.lookupTable("workspace", "1", "main", "table1")).scanner,

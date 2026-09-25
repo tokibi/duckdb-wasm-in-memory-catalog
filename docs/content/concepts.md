@@ -27,7 +27,7 @@ The Worker automatically maintains an internal counter for DuckDB metadata inval
 
 ## Views
 
-`format_version: 3` can publish views alongside tables. A view contains a name and one `SELECT` query; DuckDB binds that query and derives its columns and types when the view is used. Views can refer to catalog tables and other views. Invalid queries and circular view dependencies produce query errors without changing the published snapshot.
+The catalog can publish views alongside tables. A view contains a name and one `SELECT` query; DuckDB binds that query and derives its columns and types when the view is used. Views can refer to catalog tables and other views. Invalid queries and circular view dependencies produce query errors without changing the published snapshot.
 
 The internal catalog generation also invalidates bound view entries. After `publishSnapshot()`, `replaceTable()`, or `replaceView()` succeeds, the next query binds affected views from the current definitions.
 
@@ -44,12 +44,12 @@ A table separates three concerns:
 ```text
 columns      how the table appears to DuckDB
 scanner      how the files are interpreted
-files[].uri  where the files are located
+files        where the files are located
 ```
 
 The scanner is table-level because all files forming one table are expected to share the same read configuration.
 
-`format_version: 2` requires an explicit scanner. The catalog never chooses one from a filename, extension, or URI shape.
+Each table requires an explicit scanner. The catalog never chooses one from a filename, extension, or URI shape.
 
 The current implementation supports Parquet, CSV, JSON, and XLSX. See [Scanners](./scanners.md) for scanner configuration and the complete list of accepted options.
 
