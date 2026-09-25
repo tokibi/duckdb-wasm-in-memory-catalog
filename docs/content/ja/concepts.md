@@ -1,9 +1,9 @@
 ---
-title: コンセプト
+title: Concepts
 description: Complete Snapshot、Table Snapshot、Scanner、Cache Identity、Runtime Ownership の設計思想と仕組みを解説します。
 ---
 
-# コンセプト
+# Concepts
 
 In-Memory Catalog の設計思想と、内部でどのようにデータとキャッシュが管理されているかを解説します。
 

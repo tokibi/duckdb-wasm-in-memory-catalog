@@ -195,11 +195,11 @@ The full documentation is available online in English and Japanese:
   - [Scanners](https://tokibi.github.io/duckdb-wasm-in-memory-catalog/docs/scanners.html) — Options reference for Parquet, CSV, JSON, and XLSX.
   - [Reference](https://tokibi.github.io/duckdb-wasm-in-memory-catalog/docs/reference.html) — Snapshot schema specification, JavaScript API reference, error types.
 - [**日本語ドキュメント**](https://tokibi.github.io/duckdb-wasm-in-memory-catalog/docs/ja/)
-  - [はじめに](https://tokibi.github.io/duckdb-wasm-in-memory-catalog/docs/ja/getting-started.html)
-  - [ガイド](https://tokibi.github.io/duckdb-wasm-in-memory-catalog/docs/ja/guides.html)
-  - [コンセプト](https://tokibi.github.io/duckdb-wasm-in-memory-catalog/docs/ja/concepts.html)
-  - [スキャナ](https://tokibi.github.io/duckdb-wasm-in-memory-catalog/docs/ja/scanners.html)
-  - [リファレンス](https://tokibi.github.io/duckdb-wasm-in-memory-catalog/docs/ja/reference.html)
+  - [Getting Started](https://tokibi.github.io/duckdb-wasm-in-memory-catalog/docs/ja/getting-started.html)
+  - [Guides](https://tokibi.github.io/duckdb-wasm-in-memory-catalog/docs/ja/guides.html)
+  - [Concepts](https://tokibi.github.io/duckdb-wasm-in-memory-catalog/docs/ja/concepts.html)
+  - [Scanners](https://tokibi.github.io/duckdb-wasm-in-memory-catalog/docs/ja/scanners.html)
+  - [Reference](https://tokibi.github.io/duckdb-wasm-in-memory-catalog/docs/ja/reference.html)
 
 ---
 

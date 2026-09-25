@@ -1,9 +1,9 @@
 ---
-title: スキャナ
+title: Scanners
 description: In-Memory Catalog が対応する Parquet、CSV、JSON、XLSX スキャナの設定方法とオプション一覧。
 ---
 
-# スキャナ
+# Scanners
 
 In-Memory Catalog では、各テーブルに必ず 1 つの `scanner` を明示的に指定します。ファイル名や拡張子、URI からスキャナを推論することはありません。また、1 つのテーブルに登録されたすべてのファイルは同じスキャナ設定を共有します。
 

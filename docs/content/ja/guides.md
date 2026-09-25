@@ -1,9 +1,9 @@
 ---
-title: ガイド
+title: Guides
 description: in-memory catalog の公開、更新、クエリ、運用でよく使う実践的レシピを解説します。
 ---
 
-# ガイド
+# Guides
 
 本ガイドでは、In-Memory Catalog を実際のアプリケーションに組み込んで運用する際の具体的なユースケースとレシピを解説します。
 

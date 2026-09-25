@@ -1,9 +1,9 @@
 ---
-title: リファレンス
+title: Reference
 description: Snapshot スキーマ仕様、JavaScript API リファレンス、エラーハンドリング、制約事項をまとめます。
 ---
 
-# リファレンス
+# Reference
 
 ## スナップショット形式
 
@@ -85,7 +85,7 @@ description: Snapshot スキーマ仕様、JavaScript API リファレンス、�
 }
 ```
 
-利用可能なオプションの詳細は [スキャナ](./scanners.md) を参照してください。
+利用可能なオプションの詳細は [Scanners](./scanners.md) を参照してください。
 
 ---
 

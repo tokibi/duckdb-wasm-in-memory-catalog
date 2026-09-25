@@ -1,9 +1,9 @@
 ---
-title: Getting started
+title: Getting Started
 description: Set up DuckDB-Wasm, initialize the in-memory catalog, and execute your first query.
 ---
 
-# Getting started
+# Getting Started
 
 This guide walks you through setting up DuckDB-Wasm and running your first SQL query against the in-memory catalog.
 

@@ -1,9 +1,9 @@
 ---
-title: はじめに
+title: Getting Started
 description: DuckDB-Wasm をセットアップし、in-memory catalog を初期化して最初のクエリを実行します。
 ---
 
-# はじめに
+# Getting Started
 
 DuckDB-Wasm のデータベースから in-memory catalog をクエリできる状態までの手順を説明します。
 
@@ -263,6 +263,6 @@ worker.terminate()
 
 ## 次に読むもの
 
-- [**ガイド**](./guides.md): 単一テーブルの置換（`replaceTable`）やビューの更新、実運用の方法。
-- [**スキャナ**](./scanners.md): CSV、JSON、XLSX の設定と詳細オプション。
-- [**コンセプト**](./concepts.md): スナップショットのライフサイクルとキャッシュ分離の仕組み。
+- [**Guides**](./guides.md): 単一テーブルの置換（`replaceTable`）やビューの更新、実運用の方法。
+- [**Scanners**](./scanners.md): CSV、JSON、XLSX の設定と詳細オプション。
+- [**Concepts**](./concepts.md): スナップショットのライフサイクルとキャッシュ分離の仕組み。
