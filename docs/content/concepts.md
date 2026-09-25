@@ -1,92 +1,111 @@
 ---
 title: Concepts
-description: Understand complete snapshots, table snapshots, scanners, files, and runtime ownership.
+description: Core concepts of In-Memory Catalog including snapshot lifecycle, cache isolation, separation of concerns, and runtime ownership.
 ---
 
 # Concepts
 
-## Catalog model
+This document explains the core architectural principles and internal mechanics of the DuckDB-Wasm In-Memory Catalog.
 
-The in-memory catalog is a read-only projection of metadata owned by the host application.
+---
 
-The controller and DuckDB client run on the browser's main thread. The catalog runtime and DuckDB-Wasm run in the same Dedicated Worker. That Worker's entrypoint loads the selected DuckDB-Wasm Worker script and dispatches catalog messages to the catalog runtime; all other Worker messages are passed to DuckDB-Wasm.
+## 1. Catalog Model
 
-![Browser, Worker, and remote-file architecture](./assets/in-memory-catalog-worker-architecture-overview.svg)
+The in-memory catalog enables **publishing application-owned metadata directly to DuckDB as a standard, read-only catalog**.
 
-Catalog updates use a dedicated `MessagePort`; metadata is copied at the structured-clone boundary and the port is transferred when the session opens. Queries use the normal Worker message path; query results use transferred `ArrayBuffer`s. The extension looks up current catalog metadata synchronously inside the Worker, while DuckDB-Wasm initiates HTTP(S) reads for the files.
+![Browser, Worker, and remote file architecture](./assets/in-memory-catalog-worker-architecture-overview.svg)
 
-The application remains authoritative. DuckDB sees schemas, tables, views, and columns as normal catalog objects, but it does not own their definition.
+### Thread Separation & Synchronous Resolution
+- **Main Thread**: Runs the host application UI, `InMemoryCatalogController`, and DuckDB client.
+- **Dedicated Worker**: Hosts both DuckDB-Wasm and the catalog metadata store within the same Web Worker context.
+- **Synchronous Metadata Lookup**: When DuckDB's C++ engine binds tables, it queries the worker's metadata store synchronously via the C++ Wasm extension. This eliminates asynchronous message passing overhead and avoids blocking DuckDB's query scheduler.
+- **Single Source of Truth**: The host application retains sole authority over schema and table definitions. DuckDB consumes this metadata as an immutable catalog view.
 
-## Catalog updates
+---
 
-`publishSnapshot()` submits the complete catalog state. `replaceTable()` and `replaceView()` submit one existing relation's complete definition. The controller copies the input at call time and sends publications to the Worker in call order. The Worker validates the submitted metadata before atomically updating the current state. Failed validation leaves the current state unchanged.
+## 2. Catalog Lifecycle & Updates
 
-Successful operations update the catalog in call order. A complete publication replaces the entire state; a relation replacement preserves other tables and views. If asynchronous application work produces snapshots out of order, discard stale results before publishing them.
+The controller offers two primary update mechanisms:
 
-The Worker automatically maintains an internal counter for DuckDB metadata invalidation and generation checks during reads. Every successful publication advances it, including identical content; failed validation does not. Applications do not manage this counter.
+| Method | Target | Use Case |
+|---|---|---|
+| `publishSnapshot()` | Entire Catalog | Full schema overhaul, replacing all tables, initial setup |
+| `replaceTable()` / `replaceView()` | Single Table / View | Updating file URLs or schema for one table while preserving others |
 
-## Views
+### Atomicity & Validation
+1. **Serialized Queue**: All controller operations are queued and delivered to the Dedicated Worker in calling order.
+2. **Strict Validation**: The worker validates schema constraints, column types, and scanner configurations before committing changes.
+3. **Atomic Commit**: If validation passes, the catalog state is swapped atomically. If validation fails, changes are rejected and existing state remains untouched.
+4. **Internal Generation Tracking**: Each successful update increments an internal generation counter, automatically invalidating stale DuckDB table and view bindings.
 
-The catalog can publish views alongside tables. A view contains a name and one `SELECT` query; DuckDB binds that query and derives its columns and types when the view is used. Views can refer to catalog tables and other views. Invalid queries and circular view dependencies produce query errors without changing the published snapshot.
+---
 
-The internal catalog generation also invalidates bound view entries. After `publishSnapshot()`, `replaceTable()`, or `replaceView()` succeeds, the next query binds affected views from the current definitions.
+## 3. Separation of Concerns (Table Definition)
 
-## Table snapshot
-
-The table `snapshot` identifies the bytes and physical schema represented by that table's files. Change it when those bytes or that physical schema changes.
-
-Keeping a table's `snapshot` unchanged across unrelated catalog updates preserves its DuckDB file and Parquet cache identity.
-
-## Scanners and files
-
-A table separates three concerns:
-
-```text
-columns      how the table appears to DuckDB
-scanner      how the files are interpreted
-files        where the files are located
-```
-
-The scanner is table-level because all files forming one table are expected to share the same read configuration.
-
-Each table requires an explicit scanner. The catalog never chooses one from a filename, extension, or URI shape.
-
-The current implementation supports Parquet, CSV, JSON, and XLSX. See [Scanners](./scanners.md) for scanner configuration and the complete list of accepted options.
-
-```js
-scanner: {
-  type: 'parquet',
-  options: {},
-}
-
-```
-
-The Parquet scanner validates the physical schema against the published column count, order, names, and types. The CSV scanner uses the published columns as its read schema and validates the CSV header, column count, and values against that schema. See [Scanners](./scanners.md) for CSV defaults and options.
-
-## Scan URI and cache identity
-
-For HTTP(S) files, the extension derives an internal scan URI by adding the table snapshot as a fragment parameter:
+Every table definition separates three distinct concerns:
 
 ```text
-metadata URI:
-  https://example.test/files/events
-
-DuckDB scan URI:
-  https://example.test/files/events#duckdb-snapshot=events-r42
+1. columns   (How DuckDB views the table)   -> Column names, types, and nullability
+2. scanner   (How files are decoded)        -> Parquet / CSV / JSON / XLSX and scanner options
+3. files     (Where data lives)             -> Array of remote or local URIs
 ```
 
-Fragments stay local to the browser and DuckDB; they are not sent in HTTP requests. This changes DuckDB's cache key without changing the remote request URL.
+### Explicit Scanners
+Scanners are never inferred from filenames or extensions (`.parquet`, `.csv`). Explicitly declaring `scanner: { type: '...' }` ensures deterministic parsing even when URLs lack standard file extensions.
 
-For non-HTTP(S) URIs, the URI is passed through unchanged.
+---
 
-## Runtime ownership
+## 4. Table Snapshots & Cache Isolation
 
-The host owns the DuckDB Worker and database lifecycle. The controller owns only its catalog connection, Worker-side workspace session, and attached catalog.
+### The Caching Problem
+DuckDB-Wasm aggressively caches HTTP Range requests and Parquet metadata. When an underlying remote file changes at the same URL, DuckDB can continue returning stale cached data.
 
-`close()` waits for queued publication work, detaches the catalog, asks the Worker to drop the workspace, closes the session and connection, and reports when recovery is required. It does not terminate the Worker or database.
+### URL Fragment Isolation
+In-Memory Catalog attaches each table's `snapshot` identifier as an internal URL fragment:
 
-## Read-only by design
+```text
+Application-provided URI:
+  https://example.com/data/sales.parquet
 
-DuckDB-side catalog mutation is intentionally unsupported. Allowing DuckDB-side DDL to diverge from the application's model would create two competing sources of truth.
+DuckDB-Wasm Internal Scan URI:
+  https://example.com/data/sales.parquet#duckdb-snapshot=sales-20260925
+```
 
-When the application changes a dataset or view, update the application state and submit it with `publishSnapshot()`, `replaceTable()`, or `replaceView()`.
+- **Zero Network Impact**: Browser HTTP implementations never send URL fragments (`#...`) in HTTP requests. CDNs and web servers see only the clean base URL.
+- **DuckDB Cache Freshness**: Because DuckDB keys its internal caches on the full URI (including fragments), updating `snapshot` immediately creates a fresh cache key and invalidates stale data.
+- **Selective Retention**: Tables whose `snapshot` has not changed continue utilizing DuckDB's cache.
+
+---
+
+## 5. View Binding & Revalidation
+
+SQL views (`views`) can be published alongside tables:
+
+- **Deferred Binding**: View columns and data types are not declared in the snapshot. DuckDB resolves and binds them dynamically during query compilation.
+- **Automatic Invalidation**: Whenever referenced tables are updated via `replaceTable` or `publishSnapshot`, the incremented catalog generation forces DuckDB to re-bind the view on the next query.
+
+---
+
+## 6. Why Read-Only?
+
+In-Memory Catalog intentionally rejects DDL statements (`CREATE TABLE`, `ALTER TABLE`, `DROP TABLE`) and DML mutations (`INSERT`, `UPDATE`).
+
+Allowing DuckDB to mutate catalog state would create **two conflicting sources of truth**: the application state and the DuckDB internal catalog. By enforcing a strict **unidirectional data flow** (Application State → Snapshot → In-Memory Catalog → DuckDB Queries), the system eliminates state drift and race conditions.
+
+---
+
+## 7. Runtime Ownership
+
+- **Host Application owns**: Dedicated Worker lifecycle, DuckDB instance, and database lifecycle.
+- **Controller owns**: Catalog connection, worker workspace session, and the attached catalog.
+
+Calling `catalog.close()` detaches the catalog and drops the worker workspace, but leaves the DuckDB database and worker running so they can be reused.
+
+---
+
+## 8. Relationship with Lakehouse Formats
+
+If your infrastructure already supports Lakehouse table formats such as Apache Iceberg or Delta Lake, adopting those formats is recommended for managing table metadata and transactions at the storage layer.
+
+The goal of this library is different: it allows lightweight application-owned data structures, such as schema definitions, column metadata, and file URL lists, to serve directly as table and view definitions for DuckDB-Wasm, without requiring dedicated table formats or storage-level metadata infrastructure.
+

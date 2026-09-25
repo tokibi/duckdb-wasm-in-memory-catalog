@@ -1,13 +1,13 @@
 ---
-title: Reference
-description: Snapshot schema、JavaScript API、error、現在の制約をまとめます。
+title: リファレンス
+description: Snapshot スキーマ仕様、JavaScript API リファレンス、エラーハンドリング、制約事項をまとめます。
 ---
 
-# Reference
+# リファレンス
 
-## Snapshot format
+## スナップショット形式
 
-Catalog publication では catalog 全体の complete snapshot を送ります。
+カタログの登録や全体更新では、カタログ全体の状態を表す完全な Snapshot オブジェクトを渡します。
 
 ```js
 {
@@ -28,7 +28,7 @@ Catalog publication では catalog 全体の complete snapshot を送ります�
             { name: 'category', type: 'VARCHAR', nullable: true },
           ],
           files: [
-            'https://example.test/files/events-r42',
+            'https://example.test/files/events-r42.parquet',
           ],
         },
       ],
@@ -43,28 +43,27 @@ Catalog publication では catalog 全体の complete snapshot を送ります�
 }
 ```
 
-### Snapshot field
+### スナップショットフィールド一覧
 
-| Field | 意味 |
-| --- | --- |
-| `format_version` | Snapshot schema version（`1`）。 |
-| `schemas` | アプリケーションが publish する schema 全体。 |
-| `schemas[].name` | DuckDB schema 名。 |
-| `schemas[].tables` | Schema に含まれる table。 |
-| `schemas[].views` | Schema に含まれる view。 |
-| `tables[].name` | DuckDB table 名。 |
-| `tables[].snapshot` | Scan cache を分離するための table content/schema identity。 |
-| `tables[].scanner` | 明示的な file scanner configuration。 |
-| `tables[].columns` | DuckDB 上の順序で定義した column。 |
-| `tables[].files` | Table を構成する file の URI 文字列。 |
-| `views[].name` | DuckDB view 名。 |
-| `views[].query` | View を定義する単一の `SELECT` statement。 |
+| フィールド | 型 | 説明 |
+|---|---|---|
+| `format_version` | `number` | スナップショットのスキーマバージョン。現在は `1`。 |
+| `schemas` | `Array` | カタログに含まれるスキーマの一覧。 |
+| `schemas[].name` | `string` | DuckDB スキーマ名。 |
+| `schemas[].tables` | `Array` | スキーマに含まれるテーブル定義の配列。 |
+| `schemas[].views` | `Array` | スキーマに含まれるビュー定義の配列。 |
+| `tables[].name` | `string` | DuckDB テーブル名。 |
+| `tables[].snapshot` | `string` | キャッシュ分離のためのテーブル内容・スキーマ識別キー。 |
+| `tables[].scanner` | `object` | ファイルスキャナ設定。`type` と `options` を指定。 |
+| `tables[].columns` | `Array` | 列定義の配列。順序を保持。 |
+| `tables[].files` | `string[]` | テーブルを構成するファイル URI の配列。 |
+| `views[].name` | `string` | DuckDB ビュー名。 |
+| `views[].query` | `string` | ビューを定義する単一の `SELECT` SQL 文。 |
 
-同じ schema 内の table 名と view 名は、大文字・小文字を区別しない共通の namespace を使います。Schema には table、view、またはその両方を含められます。View の column と型は query の bind 時に DuckDB が導出するため、view metadata に `columns` はありません。
+> [!NOTE]
+> 同一スキーマ内のテーブル名とビュー名は大文字・小文字を区別せず共通の名前空間を使用します。ビューの列情報はクエリ実行時に動的に導出されるため、ビュー定義に `columns` は含めません。
 
-### Column
-
-各 column は次の形式です。
+### カラム定義
 
 ```js
 {
@@ -74,42 +73,21 @@ Catalog publication では catalog 全体の complete snapshot を送ります�
 }
 ```
 
-ファイルの列は公開した列定義と一致する必要があります。Parquetではメタデータを直接検証し、CSVとJSONでは公開した列を読み取り定義として使います。XLSXでは検出した列名を照合し、値を公開した型へ変換します。対応する型とscanner optionは[Scanner](/ja/scanners.md)を参照してください。
+- **スカラー型**: `BOOLEAN`, `TINYINT`, `SMALLINT`, `INTEGER`, `BIGINT`, `HUGEINT`, `UTINYINT`, `USMALLINT`, `UINTEGER`, `UBIGINT`, `FLOAT`, `DOUBLE`, `DECIMAL(p,s)`, `VARCHAR`, `BLOB`, `DATE`, `TIME`, `TIMESTAMP`, `TIMESTAMP WITH TIME ZONE`, `INTERVAL` 等。
+- **ネスト型**: `JSON`, `STRUCT(field type, ...)`, `LIST(type)` または `type[]`。最大 32 階層まで。
 
-### Scanner
-
-Scanner type と options は明示します。
+### スキャナ定義
 
 ```js
 {
-  type: 'parquet',
+  type: 'parquet', // 'parquet' | 'csv' | 'json' | 'xlsx'
   options: {},
 }
 ```
 
-CSV も利用できます。
+利用可能なオプションの詳細は [スキャナ](./scanners.md) を参照してください。
 
-```js
-{
-  type: 'csv',
-  options: {
-    delimiter: ',',
-    header: true,
-  },
-}
-```
-
-CSV の既定値、Catalog と DuckDB の検証境界、受け付ける option の一覧は [Scanner](./scanners.md) を参照してください。Parquet の options は空である必要があります。
-
-### File
-
-`files` の各要素は URI 文字列です。
-
-```js
-'https://example.test/data/events.parquet'
-```
-
-URI は location のみを表します。File format は `scanner` で指定します。
+---
 
 ## JavaScript API
 
@@ -124,35 +102,19 @@ const catalog = await InMemoryCatalogController.initialize(
 )
 ```
 
-DuckDB connectionを作成し、Parquetとcatalog extensionをロードし、Worker側のworkspace sessionを開き、最初のsnapshotを公開してcatalogを読み取り専用でattachします。JSON scannerまたは`JSON`型を初めて公開する前にはJSON extensionを、XLSX scannerを初めて公開する前にはExcel extensionをロードします。
+DuckDB コネクションを作成し、拡張機能をロードして初期スナップショットを登録し、読み取り専用カタログとして DuckDB に attach します。
 
-`options`:
+#### `options` パラメータ
 
-| Option | 必須 | Default | 意味 |
-| --- | --- | --- | --- |
-| `workspaceId` | yes | — | 空でない workspace/session identifier。 |
-| `catalogName` | yes | — | DuckDB に attach するときの catalog 名。 |
-| `extension` | no | `{ name: 'in_memory_catalog' }` | Extension のロード設定。`url` は Wasm extension の直接 `LOAD`、`name` と `repository` の組み合わせは `INSTALL ... FROM ...` と `LOAD` に使います。 |
-| `extensionName` | no | — | 直接 `LOAD` する名前または URL を指定するための legacy alias。`extension` とは併用しません。 |
-| `ackTimeoutMs` | no | `5000` | Worker acknowledgement を待つ positive safe integer timeout。 |
-| `onRecoveryRequired` | no | — | Cleanup 結果が不確実になった場合に呼ばれる callback。 |
+| プロパティ | 必須 | 既定値 | 説明 |
+|---|---|---|---|
+| `workspaceId` | 任意 | `crypto.randomUUID()` | セッションおよびワークスペース識別子。 |
+| `catalogName` | **必須** | — | DuckDB 内で利用するカタログ名。 |
+| `extension` | 任意 | `{ name: 'in_memory_catalog' }` | 拡張機能のロード設定。`url` による直接ロード、または `name` と `repository` によるインストールを指定。 |
+| `ackTimeoutMs` | 任意 | `5000` | Worker からの応答待ちタイムアウト。ミリ秒単位。 |
+| `onRecoveryRequired` | 任意 | — | クリーンアップ失敗時などの復旧要請コールバック。 |
 
-`extension` の例です。
-
-```js
-// アプリケーションから配信する extension asset を直接ロードする。
-extension: {
-  url: '/extension/in_memory_catalog.duckdb_extension.wasm',
-}
-
-// DuckDB extension repository から install してロードする。
-extension: {
-  name: 'in_memory_catalog',
-  repository: 'https://example.test/extensions',
-}
-```
-
-Extension binary は、アプリケーションが選択した DuckDB-Wasm version と `wasm_eh` platform に一致する必要があります。DuckDB-Wasm dependency と classic Worker URL はアプリケーションが用意します。Repository URL は DuckDB にそのまま渡されるため、利用する DuckDB-Wasm build が期待する repository layout と version/platform 解決を提供する必要があります。
+---
 
 ### `createInMemoryCatalogWorker()`
 
@@ -162,96 +124,89 @@ const worker = createInMemoryCatalogWorker({
 })
 ```
 
-DuckDB-Wasm と catalog が共有する Worker entrypoint を作成します。`duckdbWorker` は必須で、選択した DuckDB-Wasm bundle に対応する classic Worker を指定します。現在の対応範囲は `wasm_eh` で、`wasm_mvp` と `coi` は対応 API の契約に含まれません。Worker URL と catalog の各 asset は、アプリケーションの CSP およびブラウザーの same-origin/CORS 条件を満たす必要があります。
+DuckDB-Wasm とカタログメタデータストアが同居する Dedicated Worker を作成します。
+- `duckdbWorker`: DuckDB-Wasm の Classic Worker URL を指定します。
+
+---
 
 ### `catalog.connection`
 
-Catalog を attach した DuckDB connection です。Catalog を使う query はこの connection から実行します。
+カタログが attach された DuckDB コネクションインスタンスです。カタログへのクエリはこのコネクションから実行します。
 
-### `catalog.state`
-
-Controller の lifecycle state です。正常に cleanup された場合の terminal state は `closed` です。
+---
 
 ### `catalog.publishSnapshot(snapshot)`
 
-呼び出し時の snapshot を複製し、呼び出し順に publish します。検証に成功すると catalog 全体を一括置換します。最後に渡された有効な snapshot が現在の状態になります。戻り値は `Promise<void>` です。
+新しい完全スナップショットを登録し、カタログ全体を一括更新します。
+
+```js
+await catalog.publishSnapshot(nextSnapshot)
+```
+
+---
 
 ### `catalog.replaceTable(schemaName, table)`
 
-既存テーブルの定義全体を置換します。`table` は snapshot 内の table と同じ形式で、`name`、`snapshot`、`columns`、`scanner`、`files` が必要です。Schema 名と table 名は大文字・小文字を区別せずに照合し、既存の表記を維持します。追加・削除・名前変更には `publishSnapshot()` を使ってください。
+既存の単一テーブルの定義のみを更新します。
 
-入力は呼び出し時に複製され、全体置換と共通のキューで処理されます。成功すると対象テーブルだけを原子的に更新し、内部世代を進めます。戻り値は `Promise<void>` です。
+```js
+await catalog.replaceTable('analytics', {
+  name: 'events',
+  snapshot: 'v2',
+  scanner: { type: 'parquet', options: {} },
+  columns: [...],
+  files: [...],
+})
+```
+
+---
 
 ### `catalog.replaceView(schemaName, view)`
 
-既存 view の定義全体を置換します。View は `name` と `query` だけを持ちます。Schema 名と view 名は大文字・小文字を区別せずに照合し、既存の表記を維持します。View の追加、削除、名前変更には `publishSnapshot()` を使ってください。
+既存の単一ビューのクエリ定義のみを更新します。
 
-入力は呼び出し時に複製され、全体置換や単一テーブル置換と共通のキューで処理されます。成功すると対象 view だけを原子的に更新し、内部世代を進めます。戻り値は `Promise<void>` です。
+```js
+await catalog.replaceView('analytics', {
+  name: 'recent_events',
+  query: 'SELECT * FROM events WHERE is_active = true',
+})
+```
+
+---
 
 ### `catalog.diagnostics()`
 
-それ以前に queue された operation の完了後、Worker-side catalog diagnostics を返します。
+Worker 側のセッション状態、登録テーブル数、内部世代カウンタなどの診断情報を返します。
+
+---
 
 ### `catalog.close()`
 
-Catalog を detach して workspace を drop します。複数回呼んだ場合は同じ close promise を返します。
+カタログを DuckDB から detach し、Worker 内のスナップショット状態を破棄します。
 
-## Error behavior
+---
 
-Controller failure は `InMemoryCatalogControllerError` として throw され、machine-readable な `code` と message を持ちます。
+## エラーハンドリング
 
-主な code:
+コントローラーのエラーは `InMemoryCatalogControllerError` としてスローされます。
 
-| Code | 意味 |
-| --- | --- |
-| `RC_METADATA_INVALID` | Controller input または catalog metadata が不正。 |
-| `RC_CATALOG_SCHEMA_NOT_FOUND` | 単一テーブル更新の対象 schema が存在しない。 |
-| `RC_CATALOG_TABLE_NOT_FOUND` | 単一テーブル更新の対象 table が存在しない。 |
-| `RC_CATALOG_VIEW_NOT_FOUND` | 単一 view 更新の対象 view が存在しない。 |
-| `RC_REMOTE_IO` | Worker communication の失敗、timeout、想定外 response。 |
-| `RC_CATALOG_WORKSPACE_CLOSED` | Controller が operation を受け付けなくなった後に呼び出した。 |
-| `RC_CATALOG_RECOVERY_REQUIRED` | Cleanup に失敗し、対象 runtime の再作成が必要。 |
-| `RC_METADATA_GENERATION_EXHAUSTED` | Private な internal generation の上限に達した。Workspace を再作成する必要がある。 |
+| エラーコード | 原因 |
+|---|---|
+| `RC_METADATA_INVALID` | スナップショットまたはテーブル定義の構文・型が不正。 |
+| `RC_CATALOG_SCHEMA_NOT_FOUND` | 単一更新の対象スキーマが存在しない。 |
+| `RC_CATALOG_TABLE_NOT_FOUND` | 単一更新の対象テーブルが存在しない。 |
+| `RC_CATALOG_VIEW_NOT_FOUND` | 単一更新の対象ビューが存在しない。 |
+| `RC_REMOTE_IO` | Worker との通信失敗、タイムアウト、不正レスポンス。 |
+| `RC_CATALOG_WORKSPACE_CLOSED` | すでに closed 状態のコントローラーに対して操作を実行した。 |
+| `RC_CATALOG_RECOVERY_REQUIRED` | クリーンアップに失敗し、ランタイムの再作成が必要。 |
+| `RC_METADATA_GENERATION_EXHAUSTED` | 内部世代カウンタの上限に達したためワークスペースの再作成が必要。 |
 
-Snapshot validation では Worker / extension から追加の catalog-specific code が返ることがあります。分岐には error code を使い、message は診断情報として扱ってください。
+---
 
-`read_json`の出力が公開した列と一致しない場合は`RC_JSON_SCHEMA_MISMATCH`、`read_xlsx`の列名が一致しない場合は`RC_XLSX_SCHEMA_MISMATCH`、viewをparseまたはbindできない場合は`RC_CATALOG_VIEW_INVALID`、viewの依存関係が循環している場合は`RC_CATALOG_VIEW_CYCLE`を報告します。これらは`InMemoryCatalogControllerError.code`ではなく、DuckDB queryのerror messageに含まれます。
+## 現在の制約事項
 
-## 現在の制約
-
-- Public API は experimental。
-- ホストアプリケーションは DuckDB-Wasm version と、それに対応する `wasm_eh` catalog extension binary を用意する必要があります。
-- Extension build では、`versions.lock` に指定された DuckDB commit と Emscripten version を使用します。これはホストアプリケーションが選択する DuckDB-Wasm version とは別の build input です。
-- Read-only catalog。DuckDB 側からの catalog mutation は拒否される。
-- ScannerはParquet、CSV、JSON、XLSXに対応します。
-- Scanner optionはドキュメントに記載したものだけ指定できます。
-- Host が完全な column metadata を与える必要があり、catalog 自体は schema inference を行わない。
-- Table `snapshot` はアプリケーションが管理し、表す bytes または physical schema が変わったときに更新する必要がある。
-- HTTP fragment による cache isolation は DuckDB 内部の cache key を分けるもの。Mutable remote resource を server 側で version-aware にするものではない。複数 version の query を同時実行するなら immutable/versioned URL が必要。
-
-## Development
-
-必要なもの:
-
-- Node.js 22
-- pnpm 10.17.1
-- Git submodules
-- Wasm build 用 Emscripten 3.1.56
-
-```sh
-git clone --recurse-submodules https://github.com/tokibi/duckdb-wasm-in-memory-catalog.git
-cd duckdb-wasm-in-memory-catalog
-corepack enable
-pnpm install --frozen-lockfile
-pnpm test
-make build-wasm
-```
-
-Demo とドキュメントを build / preview するには:
-
-```sh
-pnpm build:pages
-pnpm serve:pages
-```
-
-`http://127.0.0.1:4175/` を開いてください。ドキュメントは `/docs/` 配下です。
+- **公開 API のステータス**: Experimental。
+- **読み取り専用**: DuckDB からの DDL や DML はサポートしていません。
+- **スキーマ自動推論なし**: ホストアプリケーション側で `columns` の型を明示する必要があります。
+- **キャッシュ分離**: URL フラグメントによる分離は DuckDB 内部のキャッシュキーを分ける仕組みであり、サーバー側のリソース自体をバージョン管理するものではありません。
+- **XLSX スキャナ**: 1 テーブルにつき 1 ファイルのみ指定可能で、`.xlsx` のみに対応します。`.xls` には対応しません。

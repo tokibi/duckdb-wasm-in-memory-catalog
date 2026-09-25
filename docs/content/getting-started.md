@@ -1,34 +1,52 @@
 ---
 title: Getting started
-description: Set up DuckDB-Wasm, initialize the in-memory catalog, and run your first query.
+description: Set up DuckDB-Wasm, initialize the in-memory catalog, and execute your first query.
 ---
 
 # Getting started
 
-This guide shows the shortest path from a DuckDB-Wasm database to a queryable in-memory catalog.
+This guide walks you through setting up DuckDB-Wasm and running your first SQL query against the in-memory catalog.
 
 > [!NOTE]
-> The repository is not published as an npm package yet. The examples below use the browser assets produced by this repository. When integrating into another build, keep the same module and Worker boundaries.
+> This project is not yet published as an npm package. The examples below use pre-built JavaScript modules and browser assets built from this repository.
 
-## 1. Prepare the browser assets
+---
 
-The catalog needs a custom Worker entrypoint that loads the classic DuckDB-Wasm Worker script. Provide the classic Worker URL belonging to the DuckDB-Wasm bundle selected by your application. The entrypoint loads that script into the same Dedicated Worker so the catalog extension can synchronously access its metadata bridge.
+## 3-Step Overview
 
-Serve these assets from your application:
+1. **Prepare assets and initialize the Dedicated Worker with DuckDB-Wasm**
+2. **Define a declarative snapshot of schemas, tables, and columns**
+3. **Initialize (attach) the catalog and execute SQL queries**
+
+---
+
+## 1. Prepare Browser Assets
+
+The catalog requires a custom worker entrypoint that wraps the classic DuckDB-Wasm worker script. Hosting both the catalog store and DuckDB-Wasm within the same Dedicated Worker allows the Wasm extension to synchronously query catalog metadata.
+
+Serve the following assets from your web server or static host:
 
 ```text
-/in-memory-catalog/in-memory-catalog-controller.mjs
-/in-memory-catalog/in-memory-catalog-worker.js
-/in-memory-catalog/in-memory-catalog-metadata-store.js
-/in-memory-catalog/in-memory-catalog-worker-runtime.js
-/duckdb/duckdb-browser-eh.worker.js
-/duckdb/duckdb-eh.wasm
-/extension/in_memory_catalog.duckdb_extension.wasm
+/in-memory-catalog/
+  ├── in-memory-catalog-controller.mjs     # Main thread controller
+  ├── in-memory-catalog-worker.js         # Dedicated Worker entrypoint
+  ├── in-memory-catalog-metadata-store.js # Metadata state manager
+  └── in-memory-catalog-worker-runtime.js # Worker runtime bindings
+/duckdb/
+  ├── duckdb-browser-eh.worker.js         # DuckDB-Wasm Classic Worker
+  └── duckdb-eh.wasm                      # DuckDB-Wasm binary (wasm_eh)
+/extension/
+  └── in_memory_catalog.duckdb_extension.wasm # Catalog Wasm extension
 ```
 
-The `duckdb` files must come from a compatible `@duckdb/duckdb-wasm` version, and the catalog extension must be built for that DuckDB version and the `wasm_eh` platform. The repository's `scripts/build-pages.ts` shows one concrete way to assemble the assets.
+> [!TIP]
+> See `scripts/build-pages.ts` in the repository for an example of how these assets are compiled and structured.
 
-## 2. Create DuckDB-Wasm with the catalog Worker
+---
+
+## 2. Initialize Dedicated Worker & DuckDB-Wasm
+
+Call `createInMemoryCatalogWorker` in your main thread script to launch the combined worker:
 
 ```js
 import * as duckdb from '@duckdb/duckdb-wasm'
@@ -37,14 +55,18 @@ import {
   InMemoryCatalogController,
 } from '/in-memory-catalog/in-memory-catalog-controller.mjs'
 
+// 1. Create the worker wrapping the classic DuckDB worker
 const worker = createInMemoryCatalogWorker({
   duckdbWorker: '/duckdb/duckdb-browser-eh.worker.js',
 })
-const db = new duckdb.AsyncDuckDB(new duckdb.VoidLogger(), worker)
 
+// 2. Instantiate DuckDB-Wasm
+const db = new duckdb.AsyncDuckDB(new duckdb.VoidLogger(), worker)
 await db.instantiate('/duckdb/duckdb-eh.wasm')
+
+// 3. Open the database
 await db.open({
-  allowUnsignedExtensions: true,
+  allowUnsignedExtensions: true, // Required for custom Wasm extensions
   maximumThreads: 1,
   filesystem: {
     reliableHeadRequests: false,
@@ -54,13 +76,16 @@ await db.open({
 })
 ```
 
-The same Worker is used by DuckDB-Wasm and the catalog controller. A normal DuckDB browser Worker is not sufficient because it does not handle the catalog's namespaced metadata messages. The supplied URL must point to a classic DuckDB-Wasm Worker; module Workers are not supported by this entrypoint. The Worker script and all imported catalog scripts must be reachable under your CSP and have the required same-origin/CORS permissions.
+> [!IMPORTANT]
+> - `allowUnsignedExtensions: true` is strictly required to load custom Wasm extensions.
+> - The worker script must be a **Classic Worker** (Module Workers are not supported by DuckDB-Wasm).
+> - Ensure your server's CORS and CSP headers allow loading remote worker scripts and range requests.
 
-`allowUnsignedExtensions` is required when loading the locally built Wasm extension.
+---
 
-## 3. Define a snapshot
+## 3. Define a Snapshot
 
-A snapshot is the complete catalog state that the Worker publishes atomically.
+A snapshot is a pure JSON object representing your catalog's complete declarative state.
 
 ```js
 const snapshot = {
@@ -71,18 +96,25 @@ const snapshot = {
       tables: [
         {
           name: 'events',
-          snapshot: 'events-r1',
+          snapshot: 'events-v1', // Cache identity key (bump when file/schema changes)
           scanner: {
-            type: 'parquet',
+            type: 'parquet',     // 'parquet' | 'csv' | 'json' | 'xlsx'
             options: {},
           },
           columns: [
             { name: 'id', type: 'BIGINT', nullable: false },
-            { name: 'category', type: 'VARCHAR', nullable: true },
+            { name: 'event_type', type: 'VARCHAR', nullable: true },
+            { name: 'created_at', type: 'TIMESTAMP', nullable: false },
           ],
           files: [
-            'https://example.com/events.parquet',
+            'https://example.com/data/events-2026.parquet',
           ],
+        },
+      ],
+      views: [
+        {
+          name: 'important_events',
+          query: "SELECT * FROM events WHERE event_type IS NOT NULL",
         },
       ],
     },
@@ -90,17 +122,22 @@ const snapshot = {
 }
 ```
 
-The catalog does not infer a scanner from the filename or URI. Every table declares its scanner explicitly. Use `type: 'csv'` for CSV files and provide CSV options when the file needs a non-default delimiter, header behavior, or other supported read setting. See [Scanners](./scanners.md) for the available options.
+- **`scanner`**: Explicitly chooses how DuckDB parses the file. No guessing based on file extension.
+- **`snapshot`**: Serves as the cache invalidation key. Changing this value ensures DuckDB bypasses its internal file and Parquet caches.
 
-## 4. Initialize the catalog
+---
+
+## 4. Initialize and Attach the Catalog
+
+`InMemoryCatalogController.initialize` loads the catalog extension, sends the snapshot to the worker, and attaches the catalog to DuckDB:
 
 ```js
 const catalog = await InMemoryCatalogController.initialize(
   db,
   worker,
   {
-    workspaceId: crypto.randomUUID(),
-    catalogName: 'app',
+    workspaceId: crypto.randomUUID(), // Unique session ID
+    catalogName: 'app',                // Catalog name in DuckDB
     extension: {
       url: '/extension/in_memory_catalog.duckdb_extension.wasm',
     },
@@ -109,29 +146,123 @@ const catalog = await InMemoryCatalogController.initialize(
 )
 ```
 
-Initialization loads Parquet support, loads the in-memory catalog extension, publishes the initial snapshot, and attaches the catalog read-only. You can instead install an extension from a compatible repository with `extension: { name: 'in_memory_catalog', repository: 'https://example.test/extensions' }`; this emits DuckDB's `INSTALL ... FROM ...` followed by `LOAD ...`. The repository must provide a binary matching the selected DuckDB-Wasm version and `wasm_eh` platform.
+---
 
-## 5. Query it
+## 5. Execute Queries
+
+Query your published tables using standard 3-part identifiers:
 
 ```js
 const result = await catalog.connection.query(`
-  SELECT id, category
+  SELECT event_type, COUNT(*) AS count
   FROM app.analytics.events
+  GROUP BY event_type
+  ORDER BY count DESC
 `)
+
+console.log(result.toArray())
 ```
 
-Use `catalog.connection` for queries that need the attached catalog.
+---
 
-## 6. Clean up
+## 6. Cleanup
+
+When done, close the catalog controller and shut down DuckDB:
 
 ```js
+// Detach catalog and discard worker snapshot state
 await catalog.close()
+
+// Terminate DuckDB and the dedicated worker
 await db.terminate()
 worker.terminate()
 ```
 
-Closing the controller detaches the catalog and drops its Worker-side snapshot. It does not terminate the DuckDB Worker or database.
+---
 
-## Next steps
+## Complete Minimal Example
 
-Read [Guides](./guides.md) for publication and update workflows, then [Concepts](./concepts.md) for generation, snapshot, scanner, and cache semantics.
+A self-contained HTML page demonstrating the full workflow:
+
+```html
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>DuckDB-Wasm In-Memory Catalog Quickstart</title>
+</head>
+<body>
+  <h1>DuckDB-Wasm In-Memory Catalog</h1>
+  <pre id="output">Initializing...</pre>
+
+  <script type="module">
+    import * as duckdb from 'https://cdn.jsdelivr.net/npm/@duckdb/duckdb-wasm@1.32.0/+esm'
+    import {
+      createInMemoryCatalogWorker,
+      InMemoryCatalogController,
+    } from '/in-memory-catalog/in-memory-catalog-controller.mjs'
+
+    const output = document.getElementById('output')
+
+    try {
+      // 1. Worker & DuckDB setup
+      const worker = createInMemoryCatalogWorker({
+        duckdbWorker: '/duckdb/duckdb-browser-eh.worker.js',
+      })
+      const db = new duckdb.AsyncDuckDB(new duckdb.VoidLogger(), worker)
+      await db.instantiate('/duckdb/duckdb-eh.wasm')
+      await db.open({ allowUnsignedExtensions: true })
+
+      // 2. Define snapshot
+      const snapshot = {
+        format_version: 1,
+        schemas: [
+          {
+            name: 'main',
+            tables: [
+              {
+                name: 'users',
+                snapshot: 'v1',
+                scanner: { type: 'parquet', options: {} },
+                columns: [
+                  { name: 'id', type: 'BIGINT', nullable: false },
+                  { name: 'name', type: 'VARCHAR', nullable: true },
+                ],
+                files: ['https://example.com/users.parquet'],
+              },
+            ],
+          },
+        ],
+      }
+
+      // 3. Initialize catalog
+      const catalog = await InMemoryCatalogController.initialize(
+        db,
+        worker,
+        {
+          catalogName: 'my_data',
+          extension: { url: '/extension/in_memory_catalog.duckdb_extension.wasm' },
+        },
+        snapshot,
+      )
+
+      // 4. Query
+      const result = await catalog.connection.query('SELECT * FROM my_data.main.users')
+      output.textContent = JSON.stringify(result.toArray(), null, 2)
+
+    } catch (err) {
+      output.textContent = 'Error: ' + err.message
+      console.error(err)
+    }
+  </script>
+</body>
+</html>
+```
+
+---
+
+## Next Steps
+
+- [**Guides**](./guides.md) — Table hot-swapping (`replaceTable`), view management, and production recipes.
+- [**Scanners**](./scanners.md) — Full configuration guide for CSV, JSON, and XLSX.
+- [**Concepts**](./concepts.md) — Snapshot lifecycle and cache isolation mechanics.

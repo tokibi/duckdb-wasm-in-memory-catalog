@@ -1,15 +1,28 @@
 ---
 title: Scanners
-description: Configure the Parquet, CSV, JSON, and XLSX scanners accepted by the catalog.
+description: Scanner configuration and option reference for Parquet, CSV, JSON, and XLSX.
 ---
 
 # Scanners
 
-Each catalog table declares one scanner. The catalog does not infer a scanner from a filename, extension, or URI. The scanner configuration is table-level, so every file in one table uses the same configuration.
+Every catalog table must explicitly declare exactly one `scanner`. The catalog never infers scanner types from filenames, extensions, or URIs. All files within a single table share the same scanner configuration.
+
+---
+
+## Supported Scanners Overview
+
+| Scanner | `type` | Key Highlights | Multiple Files |
+|---|---|---|---|
+| [**Parquet**](#parquet) | `'parquet'` | Fast projection pushdown, statistics filtering, physical schema validation | Supported |
+| [**CSV**](#csv) | `'csv'` | Highly configurable delimiter, headers, date/time parsing, strict mode | Supported |
+| [**JSON**](#json) | `'json'` | Supports NDJSON (newline-delimited) and JSON arrays | Supported |
+| [**XLSX**](#xlsx) | `'xlsx'` | Excel workbook support with sheet and cell-range filtering | Single file only |
+
+---
 
 ## Parquet
 
-Parquet tables use an empty options object:
+The Parquet scanner leverages DuckDB's native Parquet reader for high-performance column projection and statistics pushdown. `options` must be an empty object `{}`:
 
 ```js
 scanner: {
@@ -18,11 +31,11 @@ scanner: {
 }
 ```
 
-The catalog checks the physical Parquet column count, order, names, and types against the published `columns` metadata.
+The catalog verifies that the physical Parquet file schema (column count, ordering, names, and types) strictly matches the declared `columns` metadata.
 
-## Column types
+### Column Types
 
-Columns accept the scalar types listed in the reference, plus recursively nested `JSON`, `STRUCT`, and `LIST` types.
+Columns can be any scalar type documented in the reference, or recursively nested `` `JSON` ``, `` `STRUCT` ``, and `` `LIST` `` types.
 
 ```js
 columns: [
@@ -32,11 +45,15 @@ columns: [
 ]
 ```
 
-`STRUCT` fields must have unique names. `LIST(type)` and `type[]` are equivalent. Nesting is limited to 32 levels.
+- Field names in `` `STRUCT` `` cannot be duplicated.
+- `` `LIST(type)` `` and `type[]` are interchangeable.
+- Nesting is supported up to 32 levels deep.
+
+---
 
 ## CSV
 
-CSV tables use DuckDB's `read_csv` scanner with the catalog's `columns` metadata as the read schema. `auto_detect` (default `true`) sniffs the dialect and header; set it to `false` to use the declared dialect.
+The CSV scanner uses DuckDB's `read_csv` engine with the catalog's `columns` metadata acting as the forced read schema. `auto_detect` (default `true`) sniffs dialects and headers; `false` uses declared dialect options.
 
 ```js
 scanner: {
@@ -54,14 +71,14 @@ If an option is omitted, DuckDB's default is used.
 
 | Option | Accepted value | Default | Description |
 | --- | --- | --- | --- |
-| `auto_detect` | `true` / `false` | `true` | Detect the dialect and header. |
-| `header` | `true` / `false` | Sniffed with auto-detection; otherwise `false` | Treat the first row as a header. |
-| `delimiter` | Non-empty string without NUL; up to 4 bytes; `\t` is accepted | `,` | Field separator. |
-| `quote` | 0- or 1-byte string without NUL | `"` | Quote character. |
+| `auto_detect` | `true` / `false` | `true` | Sniff dialect and header settings. |
+| `header` | `true` / `false` | Sniffed when auto-detecting; `false` otherwise | Treat the first row as column headers. |
+| `delimiter` | Non-empty string up to 4 bytes without NUL; `\t` allowed | `,` | Field delimiter character. |
+| `quote` | 0- or 1-byte string without NUL | `"` | Quoting character. |
 | `escape` | 0- or 1-byte string without NUL | DuckDB default | Escape character. |
-| `comment` | 0- or 1-byte string without NUL | None | Comment-line character. |
-| `skip` | Non-negative safe integer | `0` | Rows skipped before reading. |
-| `nullstr` | String or string array without NUL | `""` | Values read as `NULL`. |
+| `comment` | 0- or 1-byte string without NUL | None | Comment prefix character. |
+| `skip` | Non-negative safe integer | `0` | Number of lines to skip from start. |
+| `nullstr` | String or array of strings without NUL | `""` | String values to interpret as `NULL`. |
 | `dateformat` | `auto` or a `strptime` format without NUL | Auto | Format for `DATE` values. |
 | `timestampformat` | `auto` or a `strptime` format without NUL | Auto | Format for timestamp values. |
 | `compression` | `auto` / `infer`, `uncompressed` / `none`, `gzip`, `zstd` | Auto-detect | Input compression. |
@@ -81,6 +98,8 @@ If an option is omitted, DuckDB's default is used.
 
 - Schema options (`columns`, `names`, `types`, `column_types`, `auto_type_candidates`) come from the catalog `columns` metadata. `all_varchar` and `normalize_names` are not accepted.
 - Virtual/partition options, reject-output options, `union_by_name`, file-sniffing controls, DuckDB aliases, and COPY-only options are not supported.
+
+---
 
 ## JSON
 
@@ -112,6 +131,8 @@ If an option is omitted, DuckDB's default is used.
 
 - `columns` is supplied by the catalog metadata. Schema-inference options are not accepted.
 - Virtual/partition columns, `union_by_name`, aliases, and COPY-only options are not supported.
+
+---
 
 ## XLSX
 

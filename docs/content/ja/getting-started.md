@@ -1,34 +1,52 @@
 ---
-title: Getting started
+title: はじめに
 description: DuckDB-Wasm をセットアップし、in-memory catalog を初期化して最初のクエリを実行します。
 ---
 
-# Getting started
+# はじめに
 
-DuckDB-Wasm の database から in-memory catalog をクエリできる状態まで、最短の手順を説明します。
+DuckDB-Wasm のデータベースから in-memory catalog をクエリできる状態までの手順を説明します。
 
 > [!NOTE]
-> 現在このリポジトリは npm package として公開されていません。以下では、このリポジトリから生成・配置した browser asset を使います。別の build system に組み込む場合も module と Worker の境界は同じです。
+> 現在このライブラリは npm package として公開されていません。以下では、リポジトリからビルドした JavaScript モジュールとブラウザアセットを利用します。
 
-## 1. Browser asset を準備する
+---
 
-Catalog は DuckDB-Wasm の classic Worker script を読み込む custom Worker entrypoint を必要とします。アプリケーションが選択した DuckDB-Wasm bundle に対応する classic Worker URL を指定します。entrypoint はその Worker script を同じ Dedicated Worker 内で読み込むため、catalog extension から metadata bridge に同期アクセスできます。
+## 全体の手順
 
-アプリケーションから次の asset を配信します。
+1. **アセットを準備し、Dedicated Worker と DuckDB-Wasm を初期化する**
+2. **テーブルやビューのスナップショットを定義する**
+3. **カタログを初期化して SQL クエリを実行する**
+
+---
+
+## 1. Browser アセットを準備する
+
+Catalog は、DuckDB-Wasm の Classic Worker スクリプトを読み込む専用の Worker エントリーポイントを必要とします。同じ Dedicated Worker 内でカタログストアと DuckDB-Wasm が動作することで、Wasm 拡張機能からメタデータストアへ同期的にアクセスできます。
+
+Web サーバーまたは静的配信ホストに、以下のアセットを配置します：
 
 ```text
-/in-memory-catalog/in-memory-catalog-controller.mjs
-/in-memory-catalog/in-memory-catalog-worker.js
-/in-memory-catalog/in-memory-catalog-metadata-store.js
-/in-memory-catalog/in-memory-catalog-worker-runtime.js
-/duckdb/duckdb-browser-eh.worker.js
-/duckdb/duckdb-eh.wasm
-/extension/in_memory_catalog.duckdb_extension.wasm
+/in-memory-catalog/
+  ├── in-memory-catalog-controller.mjs     # メインスレッド用コントローラー
+  ├── in-memory-catalog-worker.js         # Dedicated Worker エントリーポイント
+  ├── in-memory-catalog-metadata-store.js # カタログメタデータ管理
+  └── in-memory-catalog-worker-runtime.js # Worker 側ランタイム
+/duckdb/
+  ├── duckdb-browser-eh.worker.js         # DuckDB-Wasm Classic Worker
+  └── duckdb-eh.wasm                      # DuckDB-Wasm wasm_eh バイナリ
+/extension/
+  └── in_memory_catalog.duckdb_extension.wasm # カタログ Wasm 拡張機能
 ```
 
-`duckdb` のファイルは、互換性のある `@duckdb/duckdb-wasm` version から用意し、catalog extension はその DuckDB version と `wasm_eh` platform 向けに build します。具体的な配置方法は、このリポジトリの `scripts/build-pages.ts` を参考にできます。
+> [!TIP]
+> 具体的な配置やビルド方法は、本リポジトリの `scripts/build-pages.ts` を参照してください。
 
-## 2. Catalog Worker で DuckDB-Wasm を作成する
+---
+
+## 2. Dedicated Worker と DuckDB-Wasm を初期化する
+
+メインスレッドの JavaScript から `createInMemoryCatalogWorker` を呼び出し、DuckDB-Wasm とカタログが同居する Worker を生成します。
 
 ```js
 import * as duckdb from '@duckdb/duckdb-wasm'
@@ -37,14 +55,18 @@ import {
   InMemoryCatalogController,
 } from '/in-memory-catalog/in-memory-catalog-controller.mjs'
 
+// 1. DuckDB-Wasm Worker を内包する専用 Worker を作成
 const worker = createInMemoryCatalogWorker({
   duckdbWorker: '/duckdb/duckdb-browser-eh.worker.js',
 })
-const db = new duckdb.AsyncDuckDB(new duckdb.VoidLogger(), worker)
 
+// 2. DuckDB-Wasm インスタンスを初期化
+const db = new duckdb.AsyncDuckDB(new duckdb.VoidLogger(), worker)
 await db.instantiate('/duckdb/duckdb-eh.wasm')
+
+// 3. データベースを開く
 await db.open({
-  allowUnsignedExtensions: true,
+  allowUnsignedExtensions: true, // カスタム Wasm 拡張機能を読み込むために必須
   maximumThreads: 1,
   filesystem: {
     reliableHeadRequests: false,
@@ -54,13 +76,16 @@ await db.open({
 })
 ```
 
-同じ Worker を DuckDB-Wasm と catalog controller の両方で利用します。通常の DuckDB browser Worker だけでは catalog 用の namespaced metadata message を処理できません。指定する URL は classic DuckDB-Wasm Worker である必要があり、module Worker には対応していません。Worker script と catalog の各 script は CSP の許可対象であり、必要な same-origin/CORS 条件を満たす必要があります。
+> [!IMPORTANT]
+> - `allowUnsignedExtensions: true` は、本拡張機能（Wasm）を DuckDB に読み込ませるために指定が必要です。
+> - 指定する Worker URL は Classic Worker である必要があります。Module Worker には対応していません。
+> - CORS や CSP がリモートファイルおよび Worker スクリプトの読み込みを許可していることを確認してください。
 
-ローカルで build した Wasm extension をロードするため、`allowUnsignedExtensions` が必要です。
+---
 
-## 3. Snapshot を定義する
+## 3. スナップショットを定義する
 
-Snapshot は、Worker が atomic に publish する catalog 全体の状態を表します。
+スナップショットは、カタログ全体のテーブルやビューの構造を宣言的に定義する JSON オブジェクトです。
 
 ```js
 const snapshot = {
@@ -71,18 +96,25 @@ const snapshot = {
       tables: [
         {
           name: 'events',
-          snapshot: 'events-r1',
+          snapshot: 'events-v1', // キャッシュ識別子
           scanner: {
-            type: 'parquet',
+            type: 'parquet',     // 'parquet', 'csv', 'json', 'xlsx'
             options: {},
           },
           columns: [
             { name: 'id', type: 'BIGINT', nullable: false },
-            { name: 'category', type: 'VARCHAR', nullable: true },
+            { name: 'event_type', type: 'VARCHAR', nullable: true },
+            { name: 'created_at', type: 'TIMESTAMP', nullable: false },
           ],
           files: [
-            'https://example.com/events.parquet',
+            'https://example.com/data/events-2026.parquet',
           ],
+        },
+      ],
+      views: [
+        {
+          name: 'important_events',
+          query: "SELECT * FROM events WHERE event_type IS NOT NULL",
         },
       ],
     },
@@ -90,17 +122,22 @@ const snapshot = {
 }
 ```
 
-Catalog は filename や URI から scanner を推論しません。各 table が scanner を明示します。CSV file には `type: 'csv'` を指定し、delimiter や header などが既定値と異なる場合は対応する CSV option を指定します。利用できる option は [Scanner](./scanners.md) を参照してください。
+- **`scanner`**: ファイルの解釈方法を指定します。拡張子からの自動推論は行いません。CSV の場合は `type: 'csv'` とオプションを指定します。
+- **`snapshot`**: テーブルのキャッシュキーです。リモートファイルの内容やスキーマを変更した際にこの文字列を変えることで、DuckDB のキャッシュが無効化されます。
 
-## 4. Catalog を初期化する
+---
+
+## 4. カタログを初期化する
+
+`InMemoryCatalogController.initialize` を呼び出すと、Wasm 拡張機能のロード、スナップショットの送信、および DuckDB へのカタログの attach が行われます。
 
 ```js
 const catalog = await InMemoryCatalogController.initialize(
   db,
   worker,
   {
-    workspaceId: crypto.randomUUID(),
-    catalogName: 'app',
+    workspaceId: crypto.randomUUID(), // セッション識別子
+    catalogName: 'app',                // DuckDB 内で利用するカタログ名
     extension: {
       url: '/extension/in_memory_catalog.duckdb_extension.wasm',
     },
@@ -109,29 +146,123 @@ const catalog = await InMemoryCatalogController.initialize(
 )
 ```
 
-初期化時に Parquet support と catalog extension をロードし、initial snapshot を publish して catalog を read-only で attach します。互換性のある repository からインストールする場合は、`extension: { name: 'in_memory_catalog', repository: 'https://example.test/extensions' }` を指定できます。この場合は DuckDB の `INSTALL ... FROM ...` に続けて `LOAD ...` を実行します。Repository には、利用する DuckDB-Wasm version と `wasm_eh` platform に対応する binary が必要です。
+---
 
-## 5. Query する
+## 5. SQL クエリを実行する
+
+初期化完了後、`catalog.connection` を使って標準の SQL でクエリを実行できます。
 
 ```js
 const result = await catalog.connection.query(`
-  SELECT id, category
+  SELECT event_type, COUNT(*) AS count
   FROM app.analytics.events
+  GROUP BY event_type
+  ORDER BY count DESC
 `)
+
+console.log(result.toArray())
 ```
 
-Attach された catalog を使う query は `catalog.connection` から実行します。
+---
 
-## 6. 終了する
+## 6. クリーンアップ
+
+利用が終了したら、コントローラーと DuckDB をクローズします：
 
 ```js
+// カタログを detach し、Worker 内のスナップショット状態を破棄
 await catalog.close()
+
+// DuckDB インスタンスと Worker を終了
 await db.terminate()
 worker.terminate()
 ```
 
-Controller を close すると catalog を detach し、Worker 側の snapshot を破棄します。DuckDB Worker や database 自体は終了しません。
+---
+
+## 最小の動作コード例
+
+1つのファイルで動作を確認できるコード例です：
+
+```html
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <title>DuckDB-Wasm In-Memory Catalog Quickstart</title>
+</head>
+<body>
+  <h1>DuckDB-Wasm In-Memory Catalog</h1>
+  <pre id="output">初期化中...</pre>
+
+  <script type="module">
+    import * as duckdb from 'https://cdn.jsdelivr.net/npm/@duckdb/duckdb-wasm@1.32.0/+esm'
+    import {
+      createInMemoryCatalogWorker,
+      InMemoryCatalogController,
+    } from '/in-memory-catalog/in-memory-catalog-controller.mjs'
+
+    const output = document.getElementById('output')
+
+    try {
+      // 1. Worker と DuckDB のセットアップ
+      const worker = createInMemoryCatalogWorker({
+        duckdbWorker: '/duckdb/duckdb-browser-eh.worker.js',
+      })
+      const db = new duckdb.AsyncDuckDB(new duckdb.VoidLogger(), worker)
+      await db.instantiate('/duckdb/duckdb-eh.wasm')
+      await db.open({ allowUnsignedExtensions: true })
+
+      // 2. メタデータスナップショットの定義
+      const snapshot = {
+        format_version: 1,
+        schemas: [
+          {
+            name: 'main',
+            tables: [
+              {
+                name: 'users',
+                snapshot: 'v1',
+                scanner: { type: 'parquet', options: {} },
+                columns: [
+                  { name: 'id', type: 'BIGINT', nullable: false },
+                  { name: 'name', type: 'VARCHAR', nullable: true },
+                ],
+                files: ['https://example.com/users.parquet'],
+              },
+            ],
+          },
+        ],
+      }
+
+      // 3. カタログの初期化
+      const catalog = await InMemoryCatalogController.initialize(
+        db,
+        worker,
+        {
+          catalogName: 'my_data',
+          extension: { url: '/extension/in_memory_catalog.duckdb_extension.wasm' },
+        },
+        snapshot,
+      )
+
+      // 4. クエリ実行
+      const result = await catalog.connection.query('SELECT * FROM my_data.main.users')
+      output.textContent = JSON.stringify(result.toArray(), null, 2)
+
+    } catch (err) {
+      output.textContent = 'エラー: ' + err.message
+      console.error(err)
+    }
+  </script>
+</body>
+</html>
+```
+
+---
 
 ## 次に読むもの
 
-Catalog の publish / update の実践的な使い方は [Guides](./guides.md)、snapshot・scanner・cache の意味は [Concepts](./concepts.md) を参照してください。
+- [**ガイド**](./guides.md): 単一テーブルの置換（`replaceTable`）やビューの更新、実運用の方法。
+- [**スキャナ**](./scanners.md): CSV、JSON、XLSX の設定と詳細オプション。
+- [**コンセプト**](./concepts.md): スナップショットのライフサイクルとキャッシュ分離の仕組み。

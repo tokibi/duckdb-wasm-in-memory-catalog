@@ -1,155 +1,233 @@
 ---
 title: Guides
-description: Common workflows for publishing, updating, querying, and operating an in-memory catalog.
+description: Practical recipes for publishing, updating, querying, and operating in-memory catalogs.
 ---
 
 # Guides
 
-## Publish application-owned datasets
+This guide covers real-world recipes and patterns for integrating and operating In-Memory Catalog in frontend applications.
 
-Treat your application data model as the source of truth. Build a complete snapshot from that model and publish it through the controller instead of replaying DDL into DuckDB.
+---
 
-A typical application keeps metadata such as dataset names, columns, file locations, and content versions in its own state. Convert that state into the catalog snapshot shape at the boundary:
+## Recipe 1: Publish a Catalog from Application State
+
+Treat your application's data model (React state, Pinia/Redux stores, or API metadata) as the single source of truth, and transform it into a declarative snapshot:
 
 ```js
-function toCatalogSnapshot(datasets) {
+// Application dataset state
+const datasets = [
+  {
+    id: 'users',
+    version: '2026-09-01',
+    format: 'parquet',
+    fields: [
+      { name: 'id', type: 'BIGINT', nullable: false },
+      { name: 'email', type: 'VARCHAR', nullable: true },
+    ],
+    url: 'https://cdn.example.com/users.parquet',
+  },
+]
+
+// Convert to catalog snapshot format
+function createSnapshot(datasetList) {
   return {
     format_version: 1,
     schemas: [
       {
         name: 'main',
-        tables: datasets.map((dataset) => ({
-          name: dataset.name,
-          snapshot: dataset.contentVersion,
-          scanner: { type: 'parquet', options: {} },
-          columns: dataset.columns,
-          files: dataset.files.map((file) => file.url),
+        tables: datasetList.map((ds) => ({
+          name: ds.id,
+          snapshot: ds.version, // Bumping version invalidates DuckDB cache
+          scanner: { type: ds.format, options: {} },
+          columns: ds.fields,
+          files: [ds.url],
         })),
       },
     ],
   }
 }
+
+// Publish to catalog
+await catalog.publishSnapshot(createSnapshot(datasets))
 ```
 
-This keeps catalog synchronization declarative: the latest application state becomes the latest catalog state.
+This eliminates procedural DDL statements (`CREATE TABLE`, `ALTER TABLE`) and ensures application state is directly reflected in DuckDB.
 
-## Update a catalog
+---
 
-Publish a complete replacement snapshot:
+## Recipe 2: Atomically Update the Whole Catalog (`publishSnapshot`)
+
+To add/remove schemas or update all tables simultaneously, publish a new complete snapshot:
 
 ```js
+const nextSnapshot = {
+  format_version: 1,
+  schemas: [
+    {
+      name: 'main',
+      tables: [/* new table definitions */],
+      views: [/* new view definitions */],
+    },
+  ],
+}
+
 await catalog.publishSnapshot(nextSnapshot)
 ```
 
-The controller copies the input at call time and publishes snapshots in call order. A successfully validated snapshot atomically replaces the complete catalog state. Discard stale results from asynchronous application work before publishing them.
+- **Atomicity**: The controller queues calls in order. The Dedicated Worker validates the snapshot before replacing state atomically. If validation fails, the existing catalog remains active.
+- **Async Handling**: If multiple async tasks produce snapshots, discard outdated snapshots before calling `publishSnapshot`.
 
-Change each table's `snapshot` only when that table's bytes or physical file schema changes.
+---
 
-## Update one table
+## Recipe 3: Hot-Swap a Single Table (`replaceTable`)
 
-To update an existing table, submit its complete definition:
+To update a single table's files or schema without disturbing other tables or re-validating the entire catalog:
 
 ```js
+// Update only the 'events' table in the 'main' schema
 await catalog.replaceTable('main', {
   name: 'events',
-  snapshot: 'events-v2',
-  columns: nextColumns,
+  snapshot: 'events-v2', // Invalidates DuckDB cache for this table only
   scanner: { type: 'parquet', options: {} },
-  files: nextFiles,
+  columns: [
+    { name: 'id', type: 'BIGINT', nullable: false },
+    { name: 'payload', type: 'JSON', nullable: true },
+  ],
+  files: [
+    'https://cdn.example.com/events-part1.parquet',
+    'https://cdn.example.com/events-part2.parquet',
+  ],
 })
 ```
 
-The schema name and table's `name` identify the target. A missing target is an error. Other tables remain unchanged and are neither retransmitted nor revalidated.
+- If the table or schema does not exist, an error is thrown.
+- Other tables and their cached query results remain unaffected.
 
-`publishSnapshot()`, `replaceTable()`, and `replaceView()` share a queue and run in call order. The target is resolved against the catalog when the operation runs. A later complete publication replaces the entire catalog, including earlier relation updates. Failed validation preserves the current state and allows subsequent updates to continue.
+---
 
-## Publish and update views
+## Recipe 4: Publish and Hot-Swap SQL Views (`replaceView`)
 
-Define each view with a name and one `SELECT` query:
+Pre-define SQL views for common joins, aggregations, or filters alongside your tables:
 
 ```js
+// 1. Register views in snapshot
 const snapshot = {
   format_version: 1,
-  schemas: [{
-    name: 'main',
-    tables,
-    views: [{
-      name: 'active_events',
-      query: 'SELECT * FROM events WHERE active',
-    }],
-  }],
+  schemas: [
+    {
+      name: 'main',
+      tables: [/* table definitions */],
+      views: [
+        {
+          name: 'active_users',
+          query: 'SELECT id, email FROM users WHERE is_active = true',
+        },
+      ],
+    },
+  ],
 }
 await catalog.publishSnapshot(snapshot)
-```
 
-To update an existing view without retransmitting the catalog, replace its complete definition:
-
-```js
+// 2. Hot-swap the view query definition
 await catalog.replaceView('main', {
-  name: 'active_events',
-  query: 'SELECT * FROM events WHERE active AND category IS NOT NULL',
+  name: 'active_users',
+  query: 'SELECT id, email, created_at FROM users WHERE is_active = true AND verified = true',
 })
 ```
 
-Names are matched case-insensitively. Use `publishSnapshot()` to add, remove, or rename a view. DuckDB reports syntax errors, missing relations, incompatible references, and circular dependencies when it binds the view for a query.
+- View columns and types are dynamically inferred by DuckDB when the query is bound (no `columns` field required).
+- Views are automatically re-bound on subsequent queries whenever referenced tables are updated.
 
-## Query a catalog
+---
 
-Tables are addressed with normal DuckDB catalog, schema, and table qualification:
+## Recipe 5: Querying the Catalog
 
-```sql
-SELECT category, count(*)
-FROM app.analytics.events
-GROUP BY category;
-```
-
-You can also select a default catalog and schema for shorter queries:
-
-```js
-await catalog.connection.query('USE app.analytics')
-```
+Query tables and views using 3-part or 2-part identifiers:
 
 ```sql
-SELECT * FROM events;
+SELECT email, count(*)
+FROM app.main.active_users
+GROUP BY email;
 ```
 
-Catalog mutation statements are rejected. The host application remains the metadata authority.
-
-## Use remote files
-
-Each string in `files` is a location, not a format declaration. For HTTP(S) files, configure DuckDB-Wasm's filesystem so it can reach the remote resource. The supported scanners are Parquet, CSV, JSON, and XLSX; select one explicitly in `table.scanner`. See [Scanners](./scanners.md) for scanner options.
-
-The extension keeps the metadata URI unchanged but derives a DuckDB-facing scan URI using the table snapshot. URL fragments are not sent to the HTTP server, so gateways and Service Workers continue to receive the original base URI.
-
-If the same remote URI can change contents, serialize publication of the new table snapshot with queries reading that table. A query must not span a content-changing update. For concurrent reads across versions, expose an observable immutable version in the path or query string.
-
-## Inspect diagnostics
+Use `USE` to set the default catalog and schema for simpler queries:
 
 ```js
-const diagnostics = await catalog.diagnostics()
-console.log(diagnostics)
+await catalog.connection.query('USE app.main')
+
+const res = await catalog.connection.query(`
+  SELECT * FROM active_users LIMIT 10
+`)
 ```
 
-Diagnostics are useful when confirming the Worker-side workspace state after publication or while investigating metadata failures.
+> [!WARNING]
+> Catalogs are read-only. DDL (`DROP`, `ALTER`) and DML (`INSERT`, `UPDATE`) statements will fail. Always mutate state via `publishSnapshot` or `replaceTable`.
 
-## Recover from uncertain cleanup
+---
 
-Provide `onRecoveryRequired` if the application needs to react when controller cleanup cannot determine whether the Worker-side state was dropped successfully.
+## Recipe 6: Remote File Access & Cache Isolation
+
+When accessing remote HTTP(S) files, configure DuckDB-Wasm's filesystem appropriately:
+
+```js
+await db.open({
+  allowUnsignedExtensions: true,
+  maximumThreads: 1,
+  filesystem: {
+    reliableHeadRequests: false, // Prefer GET Range over HEAD
+    allowFullHTTPReads: true,    // Fallback if server lacks Range support
+    forceFullHTTPReads: false,
+  },
+})
+```
+
+### Cache Isolation via URI Fragments
+To prevent DuckDB-Wasm from reading stale cached data after files update, the extension generates internal scan URIs with fragments:
+
+- Published URI: `https://example.com/events.parquet`
+- Internal Scan URI: `https://example.com/events.parquet#duckdb-snapshot=events-v2`
+
+The fragment (`#...`) is stripped before HTTP requests reach the server, so CDN and server URLs remain unchanged while DuckDB cache keys are isolated.
+
+---
+
+## Recipe 7: Inspecting Diagnostics
+
+Use `catalog.diagnostics()` to inspect internal state and troubleshoot issues:
+
+```js
+const info = await catalog.diagnostics()
+console.log('Worker Catalog Diagnostics:', info)
+```
+
+Returns worker session state, active schemas/tables, and internal generation counters.
+
+---
+
+## Recipe 8: Recovery Callback & Lifecycle Cleanup
+
+### Recovery Handler (`onRecoveryRequired`)
+Handle communication failures or corrupted worker states cleanly:
 
 ```js
 const catalog = await InMemoryCatalogController.initialize(
   db,
   worker,
   {
-    workspaceId,
     catalogName: 'app',
-    extensionName,
+    extension: { url: '/extension/in_memory_catalog.duckdb_extension.wasm' },
     onRecoveryRequired({ workspaceId }) {
-      console.error('Catalog runtime must be recreated', workspaceId)
+      console.error('Catalog runtime must be recreated:', workspaceId)
     },
   },
   snapshot,
 )
 ```
 
-When recovery is required, recreate the affected runtime instead of assuming the previous workspace is safe to reuse.
+### Clean Teardown
+When unmounting components or terminating the session:
+
+```js
+// Awaits queued operations, detaches catalog, releases worker resources
+await catalog.close()
+```

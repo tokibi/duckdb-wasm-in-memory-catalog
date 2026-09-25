@@ -1,15 +1,28 @@
 ---
-title: Scanner
-description: Catalog が受け付ける Parquet、CSV、JSON、XLSX scanner の設定方法。
+title: スキャナ
+description: In-Memory Catalog が対応する Parquet、CSV、JSON、XLSX スキャナの設定方法とオプション一覧。
 ---
 
-# Scanner
+# スキャナ
 
-各 catalog table は scanner を1つ明示します。Catalog は filename、extension、URI から scanner を推論しません。1つの table に含まれるすべての file は同じ scanner 設定を使います。
+In-Memory Catalog では、各テーブルに必ず 1 つの `scanner` を明示的に指定します。ファイル名や拡張子、URI からスキャナを推論することはありません。また、1 つのテーブルに登録されたすべてのファイルは同じスキャナ設定を共有します。
+
+---
+
+## 対応スキャナ一覧
+
+| スキャナ | `type` | 主な特徴 | 複数ファイル対応 |
+|---|---|---|---|
+| [**Parquet**](#parquet) | `'parquet'` | 列射影プッシュダウン、統計情報フィルタリング、物理スキーマ検証 | 対応 |
+| [**CSV**](#csv) | `'csv'` | 区切り文字、ヘッダー、エンコーディング等の設定 | 対応 |
+| [**JSON**](#json) | `'json'` | NDJSON や JSON 配列の読み込み | 対応 |
+| [**XLSX**](#xlsx) | `'xlsx'` | Excel ワークブックのシート名指定、セル範囲指定 | 単一ファイルのみ |
+
+---
 
 ## Parquet
 
-Parquet table の options は空 object にします。
+Parquet スキャナは、Parquet ファイルの物理メタデータから列射影やフィルタプッシュダウンを行います。`options` は空のオブジェクト `{}` を指定します。
 
 ```js
 scanner: {
@@ -18,11 +31,11 @@ scanner: {
 }
 ```
 
-Catalog は physical Parquet の column 数、順序、名前、型を、公開されている `columns` metadata と照合します。
+カタログは、Parquet ファイル内の物理スキーマ（列数、順序、列名、データ型）が、公開された `columns` メタデータと一致しているかを自動的に検証します。
 
-## Column type
+### カラム型
 
-Columnにはreferenceに記載されたscalar typeに加え、再帰的にネストした`JSON`、`STRUCT`、`LIST`を指定できます。
+Column には reference に記載された scalar type に加え、再帰的にネストした `JSON`、`STRUCT`、`LIST` を指定できます。
 
 ```js
 columns: [
@@ -32,7 +45,11 @@ columns: [
 ]
 ```
 
-`STRUCT`のfield名は重複できません。`LIST(type)`と`type[]`は同じ意味です。ネストは32階層までです。
+- `STRUCT` の field 名は重複できません。
+- `LIST(type)` と `type[]` は同じ意味です。
+- ネストは 32 階層までです。
+
+---
 
 ## CSV
 
@@ -48,7 +65,7 @@ scanner: {
 }
 ```
 
-省略したoptionにはDuckDBの既定値が使われます。
+省略した option には DuckDB の既定値が使われます。
 
 ### CSV options
 
@@ -82,6 +99,8 @@ scanner: {
 - Schema option（`columns`、`names`、`types`、`column_types`、`auto_type_candidates`）は catalog の `columns` metadata で指定します。`all_varchar` と `normalize_names` は受け付けません。
 - 仮想/partition、reject 出力、`union_by_name`、file sniffing 制御、DuckDB alias、COPY 専用 option は未対応です。
 
+---
+
 ## JSON
 
 JSON tableではDuckDBの`read_json` scannerを使い、catalogの`columns` metadataをread schemaにします。
@@ -112,6 +131,8 @@ scanner: {
 
 - `columns`はcatalog metadataから渡します。Schema推論用optionは受け付けません。
 - 仮想/partition column、`union_by_name`、alias、COPY専用optionは未対応です。
+
+---
 
 ## XLSX
 

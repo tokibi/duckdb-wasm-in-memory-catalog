@@ -1,13 +1,13 @@
 ---
 title: Reference
-description: Snapshot schema, JavaScript API, errors, and current limitations.
+description: Complete snapshot schema specification, JavaScript API reference, error codes, and limitations.
 ---
 
 # Reference
 
-## Snapshot format
+## Snapshot Format
 
-A catalog publication sends one complete snapshot.
+Catalog publications require a complete snapshot object describing schemas, tables, and views:
 
 ```js
 {
@@ -28,7 +28,7 @@ A catalog publication sends one complete snapshot.
             { name: 'category', type: 'VARCHAR', nullable: true },
           ],
           files: [
-            'https://example.test/files/events-r42',
+            'https://example.test/files/events-r42.parquet',
           ],
         },
       ],
@@ -43,28 +43,27 @@ A catalog publication sends one complete snapshot.
 }
 ```
 
-### Snapshot fields
+### Snapshot Fields Reference
 
-| Field | Meaning |
-| --- | --- |
-| `format_version` | Snapshot schema version (`1`). |
-| `schemas` | Complete set of schemas published by the application. |
-| `schemas[].name` | DuckDB schema name. |
-| `schemas[].tables` | Tables in the schema. |
-| `schemas[].views` | Views in the schema. |
-| `tables[].name` | DuckDB table name. |
-| `tables[].snapshot` | Table content/schema identity used for scan cache isolation. |
-| `tables[].scanner` | Explicit file scanner configuration. |
-| `tables[].columns` | Published logical columns in DuckDB order. |
-| `tables[].files` | URI strings for files forming the table. |
-| `views[].name` | DuckDB view name. |
-| `views[].query` | One `SELECT` statement defining the view. |
+| Field | Type | Description |
+|---|---|---|
+| `format_version` | `number` | Snapshot schema version (currently `1`). |
+| `schemas` | `Array` | List of schemas published by the host application. |
+| `schemas[].name` | `string` | DuckDB schema name. |
+| `schemas[].tables` | `Array` | Tables contained in the schema. |
+| `schemas[].views` | `Array` | Views contained in the schema. |
+| `tables[].name` | `string` | DuckDB table name. |
+| `tables[].snapshot` | `string` | Cache identity key for scan cache isolation. |
+| `tables[].scanner` | `object` | Explicit file scanner configuration (`type`, `options`). |
+| `tables[].columns` | `Array` | Ordered column definitions. |
+| `tables[].files` | `string[]` | Array of file URI strings. |
+| `views[].name` | `string` | DuckDB view name. |
+| `views[].query` | `string` | Single `SELECT` SQL statement defining the view. |
 
-Table and view names share one case-insensitive namespace within a schema. A schema may contain tables, views, or both. View columns and types are derived by DuckDB when it binds the query, so view metadata does not include `columns`.
+> [!NOTE]
+> Table and view names within the same schema share a case-insensitive namespace. Views do not include `columns` metadata because DuckDB infers them at query binding time.
 
-### Columns
-
-Each column has:
+### Column Specification (`columns`)
 
 ```js
 {
@@ -74,42 +73,21 @@ Each column has:
 }
 ```
 
-The physical file schema must match the published columns. Parquet metadata is checked directly; CSV and JSON use the published columns as their read schema; XLSX validates detected names and casts values to the published types. See [Scanners](/scanners.md) for supported column types and scanner options.
+- **Scalar Types**: `BOOLEAN`, `TINYINT`, `SMALLINT`, `INTEGER`, `BIGINT`, `HUGEINT`, `UTINYINT`, `USMALLINT`, `UINTEGER`, `UBIGINT`, `FLOAT`, `DOUBLE`, `DECIMAL(p,s)`, `VARCHAR`, `BLOB`, `DATE`, `TIME`, `TIMESTAMP`, `TIMESTAMP WITH TIME ZONE`, `INTERVAL`, etc.
+- **Nested Types**: `JSON`, `STRUCT(...)`, `LIST(...)` or `type[]`. Nesting up to 32 levels.
 
-### Scanner
-
-The scanner type and options are explicit:
+### Scanner Specification (`scanner`)
 
 ```js
 {
-  type: 'parquet',
+  type: 'parquet', // 'parquet' | 'csv' | 'json' | 'xlsx'
   options: {},
 }
 ```
 
-CSV is also supported:
+See [Scanners Reference](./scanners.md) for full scanner options.
 
-```js
-{
-  type: 'csv',
-  options: {
-    delimiter: ',',
-    header: true,
-  },
-}
-```
-
-See [Scanners](./scanners.md) for CSV defaults, validation boundaries, and the complete list of accepted options. Parquet options must be empty.
-
-### Files
-
-Each `files` entry is a URI string:
-
-```js
-'https://example.test/data/events.parquet'
-```
-
-The URI identifies location only. File format is declared by `scanner`.
+---
 
 ## JavaScript API
 
@@ -124,35 +102,19 @@ const catalog = await InMemoryCatalogController.initialize(
 )
 ```
 
-Creates a DuckDB connection, loads Parquet and the catalog extension, opens a Worker-side workspace session, publishes the initial snapshot, and attaches the catalog read-only. Required scanner extensions are loaded before their first publication: JSON for a JSON scanner or `JSON` column, and Excel for an XLSX scanner.
+Creates a DuckDB connection, loads extensions, sends the initial snapshot to the worker, and attaches the catalog as a read-only catalog in DuckDB.
 
-`options`:
+#### `options` Parameter
 
-| Option | Required | Default | Meaning |
-| --- | --- | --- | --- |
-| `workspaceId` | yes | — | Non-empty workspace/session identifier. |
-| `catalogName` | yes | — | Name used by DuckDB when attaching the catalog. |
-| `extension` | no | `{ name: 'in_memory_catalog' }` | Extension loading configuration. Use `url` for a directly supplied Wasm extension, or `name` plus `repository` to run `INSTALL ... FROM ...` followed by `LOAD`. |
-| `extensionName` | no | — | Legacy alias for a direct `LOAD` name or URL. Do not combine it with `extension`. |
-| `ackTimeoutMs` | no | `5000` | Positive safe-integer timeout for Worker acknowledgements. |
-| `onRecoveryRequired` | no | — | Callback invoked when cleanup becomes uncertain. |
+| Property | Required | Default | Description |
+|---|---|---|---|
+| `workspaceId` | Optional | `crypto.randomUUID()` | Unique workspace/session identifier. |
+| `catalogName` | **Required** | — | Catalog name attached in DuckDB. |
+| `extension` | Optional | `{ name: 'in_memory_catalog' }` | Extension loading options. Specify `url` for direct Wasm loading or `name` and `repository` for install-and-load. |
+| `ackTimeoutMs` | Optional | `5000` | Worker response timeout in milliseconds. |
+| `onRecoveryRequired` | Optional | — | Callback invoked when runtime cleanup fails. |
 
-`extension` examples:
-
-```js
-// Directly load an extension asset served by the application.
-extension: {
-  url: '/extension/in_memory_catalog.duckdb_extension.wasm',
-}
-
-// Install and load a binary from a DuckDB extension repository.
-extension: {
-  name: 'in_memory_catalog',
-  repository: 'https://example.test/extensions',
-}
-```
-
-The extension binary must match the DuckDB-Wasm version selected by the host application and the `wasm_eh` platform. The host application supplies the DuckDB-Wasm dependency and its classic Worker URL. A repository URL is passed to DuckDB as-is; it must implement the repository layout and platform/version resolution expected by the DuckDB-Wasm build in use.
+---
 
 ### `createInMemoryCatalogWorker()`
 
@@ -162,96 +124,89 @@ const worker = createInMemoryCatalogWorker({
 })
 ```
 
-Creates the Worker entrypoint used by DuckDB-Wasm and the catalog. `duckdbWorker` is required and must be the classic Worker belonging to the selected DuckDB-Wasm bundle. The entrypoint currently supports `wasm_eh`; `wasm_mvp` and `coi` are not part of the supported API contract. The Worker URL and imported catalog assets must satisfy the application's CSP and browser same-origin/CORS rules.
+Creates the combined Dedicated Worker wrapping DuckDB-Wasm and the catalog metadata store.
+- `duckdbWorker`: URL to the classic DuckDB-Wasm worker script.
+
+---
 
 ### `catalog.connection`
 
-The DuckDB connection on which the catalog was attached. Use it for catalog queries.
+The active DuckDB connection instance where the catalog is attached. Execute all queries through this connection.
 
-### `catalog.state`
-
-Controller lifecycle state. The normal terminal state after successful cleanup is `closed`.
+---
 
 ### `catalog.publishSnapshot(snapshot)`
 
-Copies the snapshot at call time and publishes it in call order. Successful validation atomically replaces the complete catalog state. The last submitted valid snapshot becomes current. Returns `Promise<void>`.
+Atomically replaces the entire catalog state with a new snapshot:
+
+```js
+await catalog.publishSnapshot(nextSnapshot)
+```
+
+---
 
 ### `catalog.replaceTable(schemaName, table)`
 
-Replaces the complete definition of an existing table. `table` uses the same format as a table in a snapshot, requiring `name`, `snapshot`, `columns`, `scanner`, and `files`. Schema and table names are matched case-insensitively, preserving their existing spelling. Use `publishSnapshot()` to add, remove, or rename tables.
+Atomically replaces the definition of an existing table:
 
-Input is copied at call time and processed in the same queue as complete publications. Success atomically updates the target table and advances the internal generation. Returns `Promise<void>`.
+```js
+await catalog.replaceTable('analytics', {
+  name: 'events',
+  snapshot: 'v2',
+  scanner: { type: 'parquet', options: {} },
+  columns: [...],
+  files: [...],
+})
+```
+
+---
 
 ### `catalog.replaceView(schemaName, view)`
 
-Replaces the complete definition of an existing view. The view contains exactly `name` and `query`. Schema and view names are matched case-insensitively, preserving their existing spelling. Use `publishSnapshot()` to add, remove, or rename views.
+Atomically replaces the query definition of an existing view:
 
-Input is copied at call time and processed in the same queue as complete publications and table replacements. Success atomically updates the target view and advances the internal generation. Returns `Promise<void>`.
+```js
+await catalog.replaceView('analytics', {
+  name: 'recent_events',
+  query: 'SELECT * FROM events WHERE is_active = true',
+})
+```
+
+---
 
 ### `catalog.diagnostics()`
 
-Returns Worker-side catalog diagnostics after prior queued operations complete.
+Returns diagnostic information from the Dedicated Worker, including session status, table counts, and generation counters.
+
+---
 
 ### `catalog.close()`
 
-Detaches the catalog and drops the workspace. Repeated calls return the same close promise.
+Detaches the catalog from DuckDB and frees worker workspace resources.
 
-## Error behavior
+---
 
-Controller failures throw `InMemoryCatalogControllerError` with a stable `code` string and message.
+## Error Handling
 
-Important codes include:
+Errors from the controller are instances of `InMemoryCatalogControllerError`:
 
-| Code | Meaning |
-| --- | --- |
-| `RC_METADATA_INVALID` | Invalid controller input or catalog metadata. |
-| `RC_CATALOG_SCHEMA_NOT_FOUND` | The schema targeted by a table replacement does not exist. |
-| `RC_CATALOG_TABLE_NOT_FOUND` | The table targeted by a table replacement does not exist. |
-| `RC_CATALOG_VIEW_NOT_FOUND` | The view targeted by a view replacement does not exist. |
-| `RC_REMOTE_IO` | Worker communication failed, timed out, or returned an unexpected result. |
-| `RC_CATALOG_WORKSPACE_CLOSED` | An operation was attempted after the controller stopped accepting work. |
-| `RC_CATALOG_RECOVERY_REQUIRED` | Cleanup failed and the application should recreate the affected runtime. |
-| `RC_METADATA_GENERATION_EXHAUSTED` | The private internal generation reached its limit; reopen the workspace. |
+| Error Code | Description |
+|---|---|
+| `RC_METADATA_INVALID` | Invalid snapshot or table schema metadata. |
+| `RC_CATALOG_SCHEMA_NOT_FOUND` | Target schema not found during single relation update. |
+| `RC_CATALOG_TABLE_NOT_FOUND` | Target table not found during single table update. |
+| `RC_CATALOG_VIEW_NOT_FOUND` | Target view not found during single view update. |
+| `RC_REMOTE_IO` | Worker communication failure, timeout, or unexpected response. |
+| `RC_CATALOG_WORKSPACE_CLOSED` | Invoked operation on an already closed controller. |
+| `RC_CATALOG_RECOVERY_REQUIRED` | Runtime entered an unrecoverable state requiring restart. |
+| `RC_METADATA_GENERATION_EXHAUSTED` | Internal generation counter overflow (recreate workspace). |
 
-Snapshot validation can return additional catalog-specific codes from the Worker/extension. Treat the error code as the machine-readable value and the message as diagnostic text.
+---
 
-DuckDB queries report `RC_JSON_SCHEMA_MISMATCH` when `read_json` does not produce the published columns, `RC_XLSX_SCHEMA_MISMATCH` when `read_xlsx` does not produce the published column names, `RC_CATALOG_VIEW_INVALID` when a view cannot be parsed or bound, and `RC_CATALOG_VIEW_CYCLE` when view dependencies are circular. These codes appear in the DuckDB query error message rather than as `InMemoryCatalogControllerError.code`.
+## Limitations
 
-## Current limitations
-
-- Experimental public API.
-- The host application must provide a DuckDB-Wasm version and a matching `wasm_eh` catalog extension binary.
-- The extension build uses the DuckDB commit and Emscripten versions specified in `versions.lock`; these build inputs are separate from the DuckDB-Wasm version selected by the host application.
-- Read-only catalog; DuckDB-side catalog mutation is rejected.
-- Parquet, CSV, JSON, and XLSX are supported scanners.
-- Scanner options are limited to the documented allowlists.
-- The host must provide complete column metadata; schema inference is not performed by the catalog.
-- Table `snapshot` values are application-managed and must change when represented bytes or physical schema changes.
-- An internal HTTP fragment isolates DuckDB caches, but it cannot make a mutable remote resource version-aware to the server. Concurrent cross-version queries require immutable/versioned remote URLs.
-
-## Development
-
-Requirements:
-
-- Node.js 22
-- pnpm 10.17.1
-- Git submodules
-- Emscripten 3.1.56 for Wasm builds
-
-```sh
-git clone --recurse-submodules https://github.com/tokibi/duckdb-wasm-in-memory-catalog.git
-cd duckdb-wasm-in-memory-catalog
-corepack enable
-pnpm install --frozen-lockfile
-pnpm test
-make build-wasm
-```
-
-Build the demo and documentation site with:
-
-```sh
-pnpm build:pages
-pnpm serve:pages
-```
-
-Then open `http://127.0.0.1:4175/`. The documentation is served under `/docs/`.
+- **Experimental API**: The public API is evolving.
+- **Read-Only**: Catalog mutations (`INSERT`, `CREATE TABLE`) via DuckDB are rejected.
+- **Explicit Schemas**: The host application must explicitly specify `columns` (no schema inference).
+- **Cache Isolation**: Fragment IDs (`#duckdb-snapshot=...`) isolate DuckDB's client-side caches; they do not provide server-side versioning for mutable resources.
+- **XLSX Format**: Supports one file per table and requires `.xlsx` format.
