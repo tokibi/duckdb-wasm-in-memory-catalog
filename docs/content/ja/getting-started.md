@@ -91,7 +91,6 @@ await db.instantiate(new URL('duckdb/duckdb-eh.wasm', assetRoot).href)
 await db.open({
   allowUnsignedExtensions: true, // カスタム Wasm 拡張機能を読み込むために必須
   maximumThreads: 1,
-  query: { castBigIntToDouble: true },
   filesystem: {
     reliableHeadRequests: false,
     allowFullHTTPReads: true,
@@ -136,7 +135,7 @@ const snapshot = {
       views: [
         {
           name: 'category_totals',
-          query: "SELECT category, SUM(value) AS total FROM events GROUP BY category",
+          query: "SELECT category, CAST(SUM(value) AS DOUBLE) AS total FROM events GROUP BY category",
         },
       ],
     },
