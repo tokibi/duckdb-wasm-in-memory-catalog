@@ -171,8 +171,15 @@ test(
             },
             snapshot,
           );
-          const queryNumber = async (sql) =>
-            Number((await catalog.connection.query(sql)).toArray()[0].result);
+          const queryNumber = async (sql) => {
+            try {
+              return Number((await catalog.connection.query(sql)).toArray()[0].result);
+            } catch (error) {
+              throw new Error(
+                `Query failed: ${sql}\n${error instanceof Error ? error.message : error}`,
+              );
+            }
+          };
           const before = {
             parquet: await queryNumber(
               "SELECT count(*) AS result FROM test_catalog.analytics.nation",
@@ -184,7 +191,7 @@ test(
               "SELECT count(*) AS result FROM test_catalog.analytics.events_json WHERE context.browser = 'Safari'",
             ),
             xlsx: await queryNumber(
-              "SELECT count(*) AS result FROM test_catalog.analytics.spreadsheet_xlsx",
+              'SELECT count("HELLO") AS result FROM test_catalog.analytics.spreadsheet_xlsx',
             ),
             view: await queryNumber(
               "SELECT total AS result FROM test_catalog.analytics.event_totals WHERE category = 'alpha'",
