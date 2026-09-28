@@ -1,0 +1,14 @@
+{
+  "$schema": "https://raw.githubusercontent.com/fallow-rs/fallow/main/schema.json",
+  "entry": [
+    "demo/index.html",
+    "demo/in-memory-catalog-worker.ts",
+    "examples/quickstart/index.html"
+  ],
+  "ignoreUnresolvedImports": [
+    "/duckdb/duckdb-browser.mjs",
+    "/in-memory-catalog/in-memory-catalog-controller.mjs",
+    "../in-memory-catalog/in-memory-catalog-controller.mjs"
+  ],
+  "ignoreDependencies": ["apache-arrow", "flatbuffers", "tslib"]
+}
