@@ -219,6 +219,19 @@ test(
       assert.ok(actual.before.xlsx > 0, "XLSX should return rows");
       assert.equal(actual.before.view, 25);
       assert.deepEqual(actual.after, { csv: 15, view: 15 });
+
+      await page.goto(new URL("quickstart/", url).href);
+      await page.waitForFunction(() =>
+        document.querySelector("#output")?.textContent?.includes('"rows"'),
+      );
+      const quickstart = JSON.parse(await page.locator("#output").textContent());
+      assert.deepEqual(
+        quickstart.rows.map((row) => [row.category, Number(row.total)]),
+        [
+          ["books", 17],
+          ["coffee", 8],
+        ],
+      );
       assert.deepEqual(pageErrors, []);
     } catch (error) {
       error.message += `\nPages server output:\n${serverOutput}`;
