@@ -31,6 +31,14 @@ export default defineConfig({
         notFound: true,
         theme: defineTheme({
           extends: defaultTheme,
+          header: {
+            showLogo: false,
+          },
+          css: `
+            .header-nav {
+              margin-inline-start: 1rem;
+            }
+          `,
           nav: [
             { text: { en: 'Guide', ja: 'ガイド' }, link: '/getting-started/' },
             { text: { en: 'Live demo', ja: 'ライブデモ' }, link: demoUrl },
