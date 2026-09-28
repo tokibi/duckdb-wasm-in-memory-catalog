@@ -33,6 +33,7 @@ try {
   await database.open({
     allowUnsignedExtensions: true,
     maximumThreads: 1,
+    query: { castBigIntToDouble: true },
     filesystem: {
       reliableHeadRequests: false,
       allowFullHTTPReads: true,
