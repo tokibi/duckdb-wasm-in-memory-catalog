@@ -1,0 +1,44 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>In-Memory Catalog Quickstart</title>
+    <script type="importmap">
+      {
+        "imports": {
+          "apache-arrow": "../vendor/apache-arrow/Arrow.mjs",
+          "flatbuffers": "../vendor/flatbuffers/flatbuffers.js",
+          "tslib": "../vendor/tslib/tslib.es6.mjs"
+        }
+      }
+    </script>
+    <style>
+      :root {
+        color-scheme: light dark;
+        font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      }
+
+      body {
+        box-sizing: border-box;
+        max-width: 52rem;
+        margin: 3rem auto;
+        padding: 0 1.25rem;
+        line-height: 1.6;
+      }
+
+      pre {
+        overflow: auto;
+        padding: 1rem;
+        border: 1px solid #8886;
+        border-radius: 0.5rem;
+      }
+    </style>
+  </head>
+  <body>
+    <h1>DuckDB-Wasm In-Memory Catalog</h1>
+    <p>This page reads the bundled local CSV, attaches it as a catalog, and queries a view.</p>
+    <pre id="output" aria-live="polite">Starting DuckDB-Wasm…</pre>
+    <script type="module" src="./app.js"></script>
+  </body>
+</html>

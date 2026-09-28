@@ -3,7 +3,9 @@
   "compilerOptions": {
     "declaration": true,
     "emitDeclarationOnly": true,
+    "noImplicitAny": true,
     "noEmit": false,
+    "strictNullChecks": true,
     "outDir": "dist"
   },
   "include": ["src/javascript/in-memory-catalog-controller.ts"]
