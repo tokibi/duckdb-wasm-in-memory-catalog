@@ -10,6 +10,20 @@ This guide walks you through setting up DuckDB-Wasm and running your first SQL q
 > [!NOTE]
 > This project is not yet published as an npm package. The examples below use pre-built JavaScript modules and browser assets built from this repository.
 
+## Run the Quickstart Example
+
+The repository includes a complete page that reads a local CSV file, attaches it as a catalog, and queries a view. From the repository root, run:
+
+```sh
+pnpm install --frozen-lockfile
+git submodule update --init --recursive
+pnpm build:wasm
+pnpm build:pages
+pnpm serve:pages
+```
+
+Open [http://127.0.0.1:4175/quickstart/](http://127.0.0.1:4175/quickstart/). The example uses `examples/quickstart/events.csv`; it does not fetch its query data from a remote URL. `pnpm build:wasm` requires the pinned Emscripten version in `versions.lock`. `pnpm build:pages` also fetches separate fixtures for the full demo, so a network connection is needed while building the pages.
+
 ---
 
 ## 3-Step Overview
@@ -33,8 +47,13 @@ Serve the following assets from your web server or static host:
   ├── in-memory-catalog-metadata-store.js # Metadata state manager
   └── in-memory-catalog-worker-runtime.js # Worker runtime bindings
 /duckdb/
+  ├── duckdb-browser.mjs                # DuckDB-Wasm JavaScript API
   ├── duckdb-browser-eh.worker.js         # DuckDB-Wasm Classic Worker
   └── duckdb-eh.wasm                      # DuckDB-Wasm binary (wasm_eh)
+/vendor/
+  ├── apache-arrow/                       # Apache Arrow JavaScript modules
+  ├── flatbuffers/                        # FlatBuffers JavaScript modules
+  └── tslib/                              # tslib JavaScript module
 /extension/
   └── in_memory_catalog.duckdb_extension.wasm # Catalog Wasm extension
 ```
@@ -49,20 +68,23 @@ Serve the following assets from your web server or static host:
 Call `createInMemoryCatalogWorker` in your main thread script to launch the combined worker:
 
 ```js
-import * as duckdb from '@duckdb/duckdb-wasm'
 import {
   createInMemoryCatalogWorker,
   InMemoryCatalogController,
-} from '/in-memory-catalog/in-memory-catalog-controller.mjs'
+} from '../in-memory-catalog/in-memory-catalog-controller.mjs'
 
-// 1. Create the worker wrapping the classic DuckDB worker
+// This example is in examples/quickstart/app.js. Its parent directory is the built site root.
+const assetRoot = new URL('../', import.meta.url)
+const duckdb = await import(new URL('duckdb/duckdb-browser.mjs', assetRoot).href)
+// Create a worker wrapping the classic DuckDB worker
 const worker = createInMemoryCatalogWorker({
-  duckdbWorker: '/duckdb/duckdb-browser-eh.worker.js',
+  duckdbWorker: new URL('duckdb/duckdb-browser-eh.worker.js', assetRoot),
+  workerUrl: new URL('in-memory-catalog/in-memory-catalog-worker.js', assetRoot),
 })
 
 // 2. Instantiate DuckDB-Wasm
 const db = new duckdb.AsyncDuckDB(new duckdb.VoidLogger(), worker)
-await db.instantiate('/duckdb/duckdb-eh.wasm')
+await db.instantiate(new URL('duckdb/duckdb-eh.wasm', assetRoot).href)
 
 // 3. Open the database
 await db.open({
@@ -96,25 +118,23 @@ const snapshot = {
       tables: [
         {
           name: 'events',
-          snapshot: 'events-v1', // Cache identity key (bump when file/schema changes)
+          snapshot: 'local-events-v1', // Cache identity key (bump when file/schema changes)
           scanner: {
-            type: 'parquet',     // 'parquet' | 'csv' | 'json' | 'xlsx'
-            options: {},
+            type: 'csv',
+            options: { header: true },
           },
           columns: [
-            { name: 'id', type: 'BIGINT', nullable: false },
-            { name: 'event_type', type: 'VARCHAR', nullable: true },
-            { name: 'created_at', type: 'TIMESTAMP', nullable: false },
+            { name: 'event_id', type: 'INTEGER', nullable: false },
+            { name: 'category', type: 'VARCHAR', nullable: false },
+            { name: 'value', type: 'INTEGER', nullable: false },
           ],
-          files: [
-            'https://example.com/data/events-2026.parquet',
-          ],
+          files: [new URL('./events.csv', import.meta.url).href],
         },
       ],
       views: [
         {
-          name: 'important_events',
-          query: "SELECT * FROM events WHERE event_type IS NOT NULL",
+          name: 'category_totals',
+          query: "SELECT category, CAST(SUM(value) AS DOUBLE) AS total FROM events GROUP BY category",
         },
       ],
     },
@@ -139,7 +159,7 @@ const catalog = await InMemoryCatalogController.initialize(
     workspaceId: crypto.randomUUID(), // Unique session ID
     catalogName: 'app',                // Catalog name in DuckDB
     extension: {
-      url: '/extension/in_memory_catalog.duckdb_extension.wasm',
+      url: new URL('extension/in_memory_catalog.duckdb_extension.wasm', assetRoot).href,
     },
   },
   snapshot,
@@ -154,10 +174,9 @@ Query your published tables using standard 3-part identifiers:
 
 ```js
 const result = await catalog.connection.query(`
-  SELECT event_type, COUNT(*) AS count
-  FROM app.analytics.events
-  GROUP BY event_type
-  ORDER BY count DESC
+  SELECT category, total
+  FROM app.analytics.category_totals
+  ORDER BY category
 `)
 
 console.log(result.toArray())
@@ -182,82 +201,7 @@ worker.terminate()
 
 ## Complete Minimal Example
 
-A self-contained HTML page demonstrating the full workflow:
-
-```html
-<!DOCTYPE html>
-<html lang="en">
-<head>
-  <meta charset="UTF-8">
-  <title>DuckDB-Wasm In-Memory Catalog Quickstart</title>
-</head>
-<body>
-  <h1>DuckDB-Wasm In-Memory Catalog</h1>
-  <pre id="output">Initializing...</pre>
-
-  <script type="module">
-    import * as duckdb from 'https://cdn.jsdelivr.net/npm/@duckdb/duckdb-wasm@1.32.0/+esm'
-    import {
-      createInMemoryCatalogWorker,
-      InMemoryCatalogController,
-    } from '/in-memory-catalog/in-memory-catalog-controller.mjs'
-
-    const output = document.getElementById('output')
-
-    try {
-      // 1. Worker & DuckDB setup
-      const worker = createInMemoryCatalogWorker({
-        duckdbWorker: '/duckdb/duckdb-browser-eh.worker.js',
-      })
-      const db = new duckdb.AsyncDuckDB(new duckdb.VoidLogger(), worker)
-      await db.instantiate('/duckdb/duckdb-eh.wasm')
-      await db.open({ allowUnsignedExtensions: true })
-
-      // 2. Define snapshot
-      const snapshot = {
-        format_version: 1,
-        schemas: [
-          {
-            name: 'main',
-            tables: [
-              {
-                name: 'users',
-                snapshot: 'v1',
-                scanner: { type: 'parquet', options: {} },
-                columns: [
-                  { name: 'id', type: 'BIGINT', nullable: false },
-                  { name: 'name', type: 'VARCHAR', nullable: true },
-                ],
-                files: ['https://example.com/users.parquet'],
-              },
-            ],
-          },
-        ],
-      }
-
-      // 3. Initialize catalog
-      const catalog = await InMemoryCatalogController.initialize(
-        db,
-        worker,
-        {
-          catalogName: 'my_data',
-          extension: { url: '/extension/in_memory_catalog.duckdb_extension.wasm' },
-        },
-        snapshot,
-      )
-
-      // 4. Query
-      const result = await catalog.connection.query('SELECT * FROM my_data.main.users')
-      output.textContent = JSON.stringify(result.toArray(), null, 2)
-
-    } catch (err) {
-      output.textContent = 'Error: ' + err.message
-      console.error(err)
-    }
-  </script>
-</body>
-</html>
-```
+See the runnable [Quickstart page](../quickstart/) and its source in `examples/quickstart/`. It bundles a small CSV locally and demonstrates the complete setup, a table, a view, a query, and worker cleanup. Serve it over HTTP; opening the HTML directly with `file://` will not work because browser workers and Wasm assets are fetched by URL.
 
 ---
 

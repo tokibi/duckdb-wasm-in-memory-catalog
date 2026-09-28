@@ -1,3 +1,141 @@
+/** A column declared in a catalog snapshot. */
+export interface CatalogColumn {
+  name: string;
+  /** A supported DuckDB logical type, such as `BIGINT` or `STRUCT(id BIGINT)`. */
+  type: string;
+  nullable: boolean;
+}
+
+export type ParquetScannerOptions = Record<string, never>;
+
+export interface CsvScannerOptions {
+  auto_detect?: boolean;
+  header?: boolean;
+  delimiter?: string;
+  quote?: string;
+  escape?: string;
+  comment?: string;
+  skip?: number;
+  nullstr?: string | string[];
+  dateformat?: string;
+  timestampformat?: string;
+  compression?: string;
+  ignore_errors?: boolean;
+  null_padding?: boolean;
+  allow_quoted_nulls?: boolean;
+  buffer_size?: number;
+  decimal_separator?: string;
+  encoding?: string;
+  force_not_null?: string[];
+  max_line_size?: number;
+  new_line?: string;
+  parallel?: boolean;
+  sample_size?: number;
+  strict_mode?: boolean;
+  thousands?: string;
+}
+
+export interface JsonScannerOptions {
+  format?: "auto" | "array" | "newline_delimited" | "unstructured";
+  compression?: string;
+  records?: "auto" | "true" | "false";
+  ignore_errors?: boolean;
+  maximum_object_size?: number;
+  dateformat?: string;
+  timestampformat?: string;
+}
+
+export interface XlsxScannerOptions {
+  header?: boolean;
+  sheet?: string;
+  range?: string;
+  all_varchar?: boolean;
+  ignore_errors?: boolean;
+  stop_at_empty?: boolean;
+  empty_as_varchar?: boolean;
+}
+
+export type CatalogScanner =
+  | { type: "parquet"; options: ParquetScannerOptions }
+  | { type: "csv"; options: CsvScannerOptions }
+  | { type: "json"; options: JsonScannerOptions }
+  | { type: "xlsx"; options: XlsxScannerOptions };
+
+export interface CatalogTable {
+  name: string;
+  snapshot: string;
+  scanner: CatalogScanner;
+  columns: CatalogColumn[];
+  files: string[];
+}
+
+export interface CatalogView {
+  name: string;
+  query: string;
+}
+
+export interface CatalogSchema {
+  name: string;
+  tables: CatalogTable[];
+  views?: CatalogView[];
+}
+
+/** Format 1 is the currently supported catalog snapshot wire format. */
+export interface CatalogSnapshot {
+  format_version: 1;
+  schemas: CatalogSchema[];
+}
+
+export interface CatalogExtensionOptions {
+  /** Extension name, defaulting to `in_memory_catalog`. */
+  name?: string;
+  /** Direct URL to the extension Wasm file. */
+  url?: string;
+  /** Extension repository URL used with `INSTALL`. */
+  repository?: string;
+}
+
+export interface InMemoryCatalogControllerOptions {
+  workspaceId: string;
+  catalogName: string;
+  extension?: CatalogExtensionOptions;
+  /** Backward-compatible shorthand for `extension.name`. */
+  extensionName?: string;
+  ackTimeoutMs?: number;
+  onRecoveryRequired?: (details: CatalogRecoveryDetails) => void;
+}
+
+export interface CatalogRecoveryDetails {
+  component: "in_memory_catalog";
+  workspaceId: string;
+}
+
+export interface CatalogDiagnostics {
+  active_workspace_session_count: number;
+  retained_workspace_snapshot_count: number;
+  retained_catalog_revision_state: number;
+  full_lookup_count: number;
+  uri_descriptor_transfer_count: number;
+}
+
+/** The subset of a DuckDB-Wasm connection used and exposed by the controller. */
+export interface CatalogConnectionLike {
+  query(sql: string): Promise<unknown>;
+  close(): Promise<void>;
+}
+
+/** The subset of DuckDB-Wasm used to open the managed connection. */
+export interface CatalogDatabase<
+  TConnection extends CatalogConnectionLike = CatalogConnectionLike,
+> {
+  connect(): Promise<TConnection>;
+}
+
+/** A Worker that can receive the transferred workspace MessagePort. */
+export interface CatalogWorkerLike {
+  postMessage(message: unknown, transfer?: Transferable[]): void;
+}
+
 export class InMemoryCatalogControllerError extends Error {
   code: string;
 
@@ -16,15 +154,45 @@ export class InMemoryCatalogControllerError extends Error {
  * bundle; the entrypoint loads that script in the same Dedicated Worker so the
  * synchronous extension bridge remains available.
  */
-interface WorkerCreationOptions {
-  duckdbWorker?: string | URL;
+export interface WorkerCreationOptions {
+  duckdbWorker: string | URL;
   workerUrl?: string | URL;
 }
 
-export function createInMemoryCatalogWorker({
-  duckdbWorker,
-  workerUrl,
-}: WorkerCreationOptions = {}) {
+interface NormalizedExtensionOptions {
+  name: string;
+  url?: string;
+  repository?: string;
+}
+
+interface NormalizedControllerOptions {
+  workspaceId: string;
+  catalogName: string;
+  extension: NormalizedExtensionOptions;
+  ackTimeoutMs: number;
+  onRecoveryRequired?: (details: CatalogRecoveryDetails) => void;
+}
+
+interface WorkspaceReply {
+  type?: string;
+  request_id?: string;
+  ok?: unknown;
+  code?: unknown;
+  message?: unknown;
+  diagnostics?: CatalogDiagnostics;
+  [key: string]: unknown;
+}
+
+interface WorkspaceWaiter {
+  type: string;
+  requestId: string | undefined;
+  resolve: (reply: WorkspaceReply) => void;
+  reject: (reason: unknown) => void;
+  timeout: ReturnType<typeof setTimeout>;
+}
+
+export function createInMemoryCatalogWorker(options?: WorkerCreationOptions): Worker {
+  const { duckdbWorker, workerUrl } = options ?? {};
   const duckdbWorkerUrl = requireWorkerUrl(duckdbWorker, "duckdbWorker");
   const catalogWorkerUrl = requireWorkerUrl(
     workerUrl === undefined ? new URL("./in-memory-catalog-worker.js", import.meta.url) : workerUrl,
@@ -41,23 +209,30 @@ export function createInMemoryCatalogWorker({
   return new globalThis.Worker(catalogWorkerUrl, { type: "classic" });
 }
 
-export class InMemoryCatalogController {
-  #connection;
-  #session;
-  #workspaceId;
-  #catalogName;
-  #onRecoveryRequired;
-  #pending = Promise.resolve();
-  #closePromise;
+export class InMemoryCatalogController<
+  TConnection extends CatalogConnectionLike = CatalogConnectionLike,
+> {
+  #connection: TConnection;
+  #session: WorkspaceSessionClient;
+  #workspaceId: string;
+  #catalogName: string;
+  #onRecoveryRequired: ((details: CatalogRecoveryDetails) => void) | undefined;
+  #pending: Promise<void> = Promise.resolve();
+  #closePromise: Promise<void> | undefined;
   #attached = false;
-  #state = "active";
+  #state: "active" | "closing" | "closed" | "failed_closed" = "active";
   #recoveryReported = false;
-  #loadedExtensions = new Set();
+  #loadedExtensions = new Set<string>();
 
-  static async initialize(db, worker, options, initialSnapshot) {
+  static async initialize<TConnection extends CatalogConnectionLike>(
+    db: CatalogDatabase<TConnection>,
+    worker: CatalogWorkerLike,
+    options: InMemoryCatalogControllerOptions,
+    initialSnapshot: CatalogSnapshot,
+  ): Promise<InMemoryCatalogController<TConnection>> {
     const normalized = normalizeOptions(options);
     const connection = await db.connect();
-    let controller;
+    let controller: InMemoryCatalogController<TConnection> | undefined;
     try {
       await connection.query("LOAD parquet");
       if (normalized.extension.repository !== undefined) {
@@ -97,7 +272,11 @@ export class InMemoryCatalogController {
     }
   }
 
-  constructor(connection, session, options) {
+  private constructor(
+    connection: TConnection,
+    session: WorkspaceSessionClient,
+    options: NormalizedControllerOptions,
+  ) {
     this.#connection = connection;
     this.#session = session;
     this.#workspaceId = options.workspaceId;
@@ -105,15 +284,15 @@ export class InMemoryCatalogController {
     this.#onRecoveryRequired = options.onRecoveryRequired;
   }
 
-  get connection() {
+  get connection(): TConnection {
     return this.#connection;
   }
 
-  get state() {
+  get state(): "active" | "closing" | "closed" | "failed_closed" {
     return this.#state;
   }
 
-  publishSnapshot(snapshot) {
+  publishSnapshot(snapshot: CatalogSnapshot): Promise<void> {
     if (this.#state !== "active") {
       return Promise.reject(
         new InMemoryCatalogControllerError(
@@ -122,7 +301,7 @@ export class InMemoryCatalogController {
         ),
       );
     }
-    let submittedSnapshot;
+    let submittedSnapshot: CatalogSnapshot;
     try {
       submittedSnapshot = structuredClone(snapshot);
     } catch {
@@ -146,7 +325,7 @@ export class InMemoryCatalogController {
     return operation;
   }
 
-  replaceTable(schemaName, table) {
+  replaceTable(schemaName: string, table: CatalogTable): Promise<void> {
     if (this.#state !== "active") {
       return Promise.reject(
         new InMemoryCatalogControllerError(
@@ -155,13 +334,13 @@ export class InMemoryCatalogController {
         ),
       );
     }
-    let submittedSchemaName;
+    let submittedSchemaName: string;
     try {
       submittedSchemaName = requireName(schemaName, "schemaName");
     } catch (error) {
       return Promise.reject(error);
     }
-    let submittedTable;
+    let submittedTable: CatalogTable;
     try {
       submittedTable = structuredClone(table);
     } catch {
@@ -185,7 +364,7 @@ export class InMemoryCatalogController {
     return operation;
   }
 
-  replaceView(schemaName, view) {
+  replaceView(schemaName: string, view: CatalogView): Promise<void> {
     if (this.#state !== "active") {
       return Promise.reject(
         new InMemoryCatalogControllerError(
@@ -194,13 +373,13 @@ export class InMemoryCatalogController {
         ),
       );
     }
-    let submittedSchemaName;
+    let submittedSchemaName: string;
     try {
       submittedSchemaName = requireName(schemaName, "schemaName");
     } catch (error) {
       return Promise.reject(error);
     }
-    let submittedView;
+    let submittedView: CatalogView;
     try {
       submittedView = structuredClone(view);
     } catch {
@@ -223,7 +402,7 @@ export class InMemoryCatalogController {
     return operation;
   }
 
-  diagnostics() {
+  diagnostics(): Promise<CatalogDiagnostics> {
     if (this.#state !== "active") {
       return Promise.reject(
         new InMemoryCatalogControllerError(
@@ -238,20 +417,20 @@ export class InMemoryCatalogController {
         "IN_MEMORY_CATALOG_GET_DIAGNOSTICS_RESULT",
       );
       requireSuccessfulResult(result, "Catalog diagnostics failed");
-      return result.diagnostics;
+      return result.diagnostics as CatalogDiagnostics;
     });
   }
 
-  close() {
+  close(): Promise<void> {
     if (this.#closePromise) return this.#closePromise;
     this.#state = "closing";
     this.#closePromise = this.#performClose();
     return this.#closePromise;
   }
 
-  async #performClose() {
+  async #performClose(): Promise<void> {
     await this.#pending;
-    let failure;
+    let failure: InMemoryCatalogControllerError | undefined;
     try {
       if (this.#attached) {
         await this.#connection.query(`DETACH ${quoteIdentifier(this.#catalogName)}`);
@@ -288,7 +467,7 @@ export class InMemoryCatalogController {
     if (failure) throw failure;
   }
 
-  #reportRecoveryRequired() {
+  #reportRecoveryRequired(): void {
     if (this.#recoveryReported) return;
     this.#recoveryReported = true;
     try {
@@ -301,7 +480,7 @@ export class InMemoryCatalogController {
     }
   }
 
-  async #ensureRequiredExtensions(metadata) {
+  async #ensureRequiredExtensions(metadata: CatalogSnapshot | CatalogTable): Promise<void> {
     for (const extension of requiredExtensions(metadata)) {
       if (this.#loadedExtensions.has(extension)) continue;
       await this.#connection.query(`LOAD ${extension}`);
@@ -310,36 +489,49 @@ export class InMemoryCatalogController {
   }
 }
 
-function requiredExtensions(metadata) {
-  const tables = Array.isArray(metadata?.schemas)
-    ? metadata.schemas.flatMap((schema) => (Array.isArray(schema?.tables) ? schema.tables : []))
-    : [metadata];
-  const extensions = new Set();
-  if (
-    tables.some(
-      (table) =>
-        table?.scanner?.type === "json" ||
-        (Array.isArray(table?.columns) &&
-          table.columns.some(
-            (column) =>
-              typeof column?.type === "string" &&
-              /(^|[^A-Za-z0-9_$])JSON([^A-Za-z0-9_$]|$)/u.test(column.type),
-          )),
-    )
-  )
-    extensions.add("json");
-  if (tables.some((table) => table?.scanner?.type === "xlsx")) extensions.add("excel");
+function requiredExtensions(metadata: unknown): Set<string> {
+  const tables: unknown[] =
+    isRecord(metadata) && Array.isArray(metadata.schemas)
+      ? metadata.schemas.flatMap((schema) =>
+          isRecord(schema) && Array.isArray(schema.tables) ? schema.tables : [],
+        )
+      : [metadata];
+  const extensions = new Set<string>();
+  if (tables.some(usesJsonExtension)) extensions.add("json");
+  if (tables.some(usesExcelExtension)) extensions.add("excel");
   return extensions;
 }
 
+function usesJsonExtension(table: unknown): boolean {
+  if (!isRecord(table)) return false;
+  const usesJsonScanner = isRecord(table.scanner) && table.scanner.type === "json";
+  const usesJsonColumn =
+    Array.isArray(table.columns) &&
+    table.columns.some(
+      (column) =>
+        isRecord(column) &&
+        typeof column.type === "string" &&
+        /(^|[^A-Za-z0-9_$])JSON([^A-Za-z0-9_$]|$)/u.test(column.type),
+    );
+  return usesJsonScanner || usesJsonColumn;
+}
+
+function usesExcelExtension(table: unknown): boolean {
+  return isRecord(table) && isRecord(table.scanner) && table.scanner.type === "xlsx";
+}
+
 class WorkspaceSessionClient {
-  #port;
-  #ackTimeoutMs;
+  #port: MessagePort;
+  #ackTimeoutMs: number;
   #sequence = 0;
-  #waiter;
+  #waiter: WorkspaceWaiter | undefined;
   #closed = false;
 
-  static async open(worker, workspaceId, ackTimeoutMs) {
+  static async open(
+    worker: CatalogWorkerLike,
+    workspaceId: string,
+    ackTimeoutMs: number,
+  ): Promise<WorkspaceSessionClient> {
     const channel = new MessageChannel();
     const client = new WorkspaceSessionClient(channel.port1, ackTimeoutMs);
     const opened = client.#waitFor("IN_MEMORY_CATALOG_WORKSPACE_SESSION_OPENED", undefined);
@@ -373,7 +565,7 @@ class WorkspaceSessionClient {
     }
   }
 
-  constructor(port, ackTimeoutMs) {
+  constructor(port: MessagePort, ackTimeoutMs: number) {
     this.#port = port;
     this.#ackTimeoutMs = ackTimeoutMs;
     port.onmessage = (event) => this.#receive(event.data);
@@ -384,7 +576,11 @@ class WorkspaceSessionClient {
     port.start?.();
   }
 
-  request(type, resultType, payload = {}) {
+  request(
+    type: string,
+    resultType: string,
+    payload: Record<string, unknown> = {},
+  ): Promise<WorkspaceReply> {
     if (this.#closed) {
       return Promise.reject(
         new InMemoryCatalogControllerError(
@@ -407,7 +603,7 @@ class WorkspaceSessionClient {
     return result;
   }
 
-  close() {
+  close(): void {
     if (this.#closed) return;
     this.#closed = true;
     this.#rejectWaiter(
@@ -419,7 +615,7 @@ class WorkspaceSessionClient {
     this.#port.close();
   }
 
-  #waitFor(type, requestId) {
+  #waitFor(type: string, requestId: string | undefined): Promise<WorkspaceReply> {
     if (this.#waiter) {
       return Promise.reject(
         new InMemoryCatalogControllerError(
@@ -443,7 +639,9 @@ class WorkspaceSessionClient {
     });
   }
 
-  #receive(message) {
+  #receive(value: unknown): void {
+    if (!isRecord(value)) return;
+    const message = value as WorkspaceReply;
     const waiter = this.#waiter;
     if (!waiter || message?.type !== waiter.type) return;
     if (waiter.requestId !== undefined && message?.request_id !== waiter.requestId) return;
@@ -452,7 +650,7 @@ class WorkspaceSessionClient {
     waiter.resolve(message);
   }
 
-  #rejectWaiter(error) {
+  #rejectWaiter(error: unknown): void {
     const waiter = this.#waiter;
     if (!waiter) return;
     this.#waiter = undefined;
@@ -461,13 +659,14 @@ class WorkspaceSessionClient {
   }
 }
 
-function normalizeOptions(options) {
-  if (!options || typeof options !== "object") {
+function normalizeOptions(input: unknown): NormalizedControllerOptions {
+  if (!input || typeof input !== "object") {
     throw new InMemoryCatalogControllerError(
       "RC_METADATA_INVALID",
       "Controller options are required",
     );
   }
+  const options = input as Record<string, unknown>;
   if (
     options.onRecoveryRequired !== undefined &&
     typeof options.onRecoveryRequired !== "function"
@@ -478,7 +677,11 @@ function normalizeOptions(options) {
     );
   }
   const ackTimeoutMs = options.ackTimeoutMs === undefined ? 5_000 : options.ackTimeoutMs;
-  if (!Number.isSafeInteger(ackTimeoutMs) || ackTimeoutMs <= 0) {
+  if (
+    typeof ackTimeoutMs !== "number" ||
+    !Number.isSafeInteger(ackTimeoutMs) ||
+    ackTimeoutMs <= 0
+  ) {
     throw new InMemoryCatalogControllerError(
       "RC_METADATA_INVALID",
       "ackTimeoutMs must be a positive safe integer",
@@ -489,22 +692,25 @@ function normalizeOptions(options) {
     catalogName: requireName(options.catalogName, "catalogName"),
     extension: normalizeExtension(options),
     ackTimeoutMs,
-    onRecoveryRequired: options.onRecoveryRequired,
+    ...(options.onRecoveryRequired === undefined
+      ? {}
+      : {
+          onRecoveryRequired: options.onRecoveryRequired as (
+            details: CatalogRecoveryDetails,
+          ) => void,
+        }),
   };
 }
 
-function normalizeExtension(options) {
+function normalizeExtension(options: Record<string, unknown>): NormalizedExtensionOptions {
   if (options.extension !== undefined) {
-    if (
-      !options.extension ||
-      typeof options.extension !== "object" ||
-      Array.isArray(options.extension)
-    ) {
+    if (!isRecord(options.extension)) {
       throw new InMemoryCatalogControllerError(
         "RC_METADATA_INVALID",
         "extension must be an object",
       );
     }
+    const extension = options.extension;
     if (options.extensionName !== undefined) {
       throw new InMemoryCatalogControllerError(
         "RC_METADATA_INVALID",
@@ -512,17 +718,17 @@ function normalizeExtension(options) {
       );
     }
     const name =
-      options.extension.name === undefined
+      extension.name === undefined
         ? "in_memory_catalog"
-        : requireName(options.extension.name, "extension.name");
+        : requireName(extension.name, "extension.name");
     const url =
-      options.extension.url === undefined
+      extension.url === undefined
         ? undefined
-        : requireExtensionLocation(options.extension.url, "extension.url");
+        : requireExtensionLocation(extension.url, "extension.url");
     const repository =
-      options.extension.repository === undefined
+      extension.repository === undefined
         ? undefined
-        : requireExtensionLocation(options.extension.repository, "extension.repository");
+        : requireExtensionLocation(extension.repository, "extension.repository");
     if (url !== undefined && repository !== undefined) {
       throw new InMemoryCatalogControllerError(
         "RC_METADATA_INVALID",
@@ -539,11 +745,11 @@ function normalizeExtension(options) {
   return { name };
 }
 
-function requireExtensionLocation(value, field) {
+function requireExtensionLocation(value: unknown, field: string): string {
   return requireName(value, field);
 }
 
-function requireWorkerUrl(value, field) {
+function requireWorkerUrl(value: unknown, field: string): URL {
   if (value instanceof URL) return new URL(value.href);
   if (typeof value !== "string" || value.length === 0 || value.includes("\0")) {
     throw new InMemoryCatalogControllerError(
@@ -561,7 +767,7 @@ function requireWorkerUrl(value, field) {
   }
 }
 
-function requireSuccessfulResult(result, fallbackMessage) {
+function requireSuccessfulResult(result: WorkspaceReply, fallbackMessage: string): void {
   if (result?.ok === true) return;
   throw new InMemoryCatalogControllerError(
     typeof result?.code === "string" ? result.code : "RC_REMOTE_IO",
@@ -569,7 +775,7 @@ function requireSuccessfulResult(result, fallbackMessage) {
   );
 }
 
-function requireName(value, field) {
+function requireName(value: unknown, field: string): string {
   if (typeof value !== "string" || value.length === 0 || value.includes("\0")) {
     throw new InMemoryCatalogControllerError(
       "RC_METADATA_INVALID",
@@ -579,10 +785,14 @@ function requireName(value, field) {
   return value;
 }
 
-function quote(value) {
+function quote(value: string): string {
   return `'${value.replaceAll("'", "''")}'`;
 }
 
-function quoteIdentifier(value) {
+function quoteIdentifier(value: string): string {
   return `"${value.replaceAll('"', '""')}"`;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === "object" && !Array.isArray(value);
 }

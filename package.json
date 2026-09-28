@@ -15,6 +15,7 @@
   "scripts": {
     "build": "vite build && tsc -p tsconfig.lib.json",
     "test": "vitest run",
+    "test:e2e": "node --test test/e2e/catalog-browser.test.mjs",
     "test:watch": "vitest",
     "lint": "oxlint src demo scripts test vite.config.ts vite.demo.config.ts vitest.config.ts",
     "fmt": "oxfmt src demo scripts test vite.config.ts vite.demo.config.ts vitest.config.ts package.json tsconfig.json tsconfig.lib.json oxlint.json .pre-commit-config.yaml",
@@ -38,6 +39,7 @@
     "@types/node": "^22.20.2",
     "oxfmt": "^0.68.0",
     "oxlint": "^1.83.0",
+    "playwright": "1.63.0",
     "typescript": "^5.9.3",
     "vite": "8.0.0",
     "vitest": "^5.0.1"

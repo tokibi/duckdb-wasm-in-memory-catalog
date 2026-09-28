@@ -30,6 +30,8 @@ for (const file of [
   await copy(`dist/${file}`, `in-memory-catalog/${file}`);
 }
 
+await copy("examples/quickstart", "quickstart");
+
 await copy("node_modules/@duckdb/duckdb-wasm/dist/duckdb-browser.mjs", "duckdb/duckdb-browser.mjs");
 await copy("node_modules/@duckdb/duckdb-wasm/dist/duckdb-eh.wasm", "duckdb/duckdb-eh.wasm");
 await copy(

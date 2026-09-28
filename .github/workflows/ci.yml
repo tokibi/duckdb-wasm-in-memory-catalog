@@ -27,7 +27,6 @@ jobs:
   pages:
     name: Wasm and Pages build
     runs-on: ubuntu-latest
-    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v5
         with:
@@ -46,3 +45,5 @@ jobs:
           actions-cache-folder: emsdk-cache
       - run: make build-wasm
       - run: pnpm build:pages
+      - run: pnpm exec playwright install --with-deps chromium
+      - run: pnpm test:e2e
