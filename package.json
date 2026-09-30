@@ -13,6 +13,7 @@
     "./worker-runtime": "./dist/in-memory-catalog-worker-runtime.js"
   },
   "scripts": {
+    "prepare": "node scripts/setup-hooks.mjs",
     "build": "vite build && tsc -p tsconfig.lib.json",
     "test": "vitest run",
     "test:e2e": "node --test test/e2e/catalog-browser.test.mjs",
@@ -23,11 +24,12 @@
     "typecheck": "tsc --noEmit",
     "check": "pnpm lint && pnpm fmt:check && pnpm typecheck && pnpm test",
     "fallow:audit": "fallow audit --base origin/main",
+    "fallow:precommit": "fallow audit",
     "build:wasm": "sh scripts/build-wasm.sh",
     "build:pages": "pnpm build && node --experimental-strip-types scripts/build-pages.ts && pnpm --dir docs build",
     "build:docs": "pnpm --dir docs build",
     "serve:pages": "node --experimental-strip-types scripts/serve-pages.ts",
-    "prek:install": "prek install"
+    "prek:install": "node scripts/setup-hooks.mjs"
   },
   "dependencies": {
     "apache-arrow": "17.0.0",
