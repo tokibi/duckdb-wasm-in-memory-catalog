@@ -12,6 +12,8 @@ jobs:
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
       - uses: pnpm/action-setup@v4
         with:
           version: 10.17.1
@@ -20,6 +22,9 @@ jobs:
           node-version: 22
           cache: pnpm
       - run: pnpm install --frozen-lockfile --ignore-scripts
+      - name: Fallow audit
+        if: ${{ github.event_name == 'pull_request' }}
+        run: pnpm fallow:audit
       - run: pnpm check
       - run: pnpm build
       - run: pnpm build:docs

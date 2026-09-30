@@ -3,11 +3,16 @@ repos:
     hooks:
       - id: oxlint
         name: oxlint
-        entry: pnpm lint
+        entry: node --run lint
         language: system
         pass_filenames: false
       - id: oxfmt-check
         name: oxfmt check
-        entry: pnpm fmt:check
+        entry: node --run fmt:check
+        language: system
+        pass_filenames: false
+      - id: fallow-audit
+        name: Fallow audit
+        entry: node --run fallow:precommit
         language: system
         pass_filenames: false

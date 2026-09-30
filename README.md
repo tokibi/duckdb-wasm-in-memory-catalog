@@ -234,6 +234,8 @@ pnpm build:pages
 pnpm serve:pages
 ```
 
+Installing dependencies automatically enables the pre-commit hooks for lint, formatting, and Fallow. Node.js 22 or later is required. The Fallow hook audits the changes being committed. To run that check manually, use `pnpm exec prek run fallow-audit --stage pre-commit`; Fallow selects the upstream merge base automatically. CI pins the audit base to `origin/main`. In Work, use `corepack pnpm install --frozen-lockfile` to select the pnpm version declared by this project. If dependencies were installed with `--ignore-scripts`, run `node --run prek:install` before developing.
+
 Open `http://127.0.0.1:4175/`. The live interactive demo is at `/` and the documentation site is at `/docs/`.
 
 ---
