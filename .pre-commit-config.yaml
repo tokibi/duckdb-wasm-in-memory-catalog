@@ -11,3 +11,8 @@ repos:
         entry: pnpm fmt:check
         language: system
         pass_filenames: false
+      - id: fallow-audit
+        name: Fallow audit
+        entry: pnpm exec fallow audit
+        language: system
+        pass_filenames: false

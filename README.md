@@ -221,6 +221,7 @@ cd duckdb-wasm-in-memory-catalog
 
 # Install dependencies and verify
 pnpm install --frozen-lockfile
+pnpm prek:install
 pnpm check
 
 # Build TypeScript library
@@ -233,6 +234,8 @@ make build-wasm
 pnpm build:pages
 pnpm serve:pages
 ```
+
+The installed pre-commit hook runs Fallow against the changes being committed. To run that check manually, use `pnpm exec prek run fallow-audit --stage pre-commit`; Fallow selects the upstream merge base automatically. CI pins the audit base to `origin/main`.
 
 Open `http://127.0.0.1:4175/`. The live interactive demo is at `/` and the documentation site is at `/docs/`.
 
