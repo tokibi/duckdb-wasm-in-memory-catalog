@@ -28,7 +28,7 @@ If your infrastructure already manages tables with Lakehouse formats such as Apa
 
 - ⚡ **Declarative Catalog Publishing**: Expose application-managed metadata as a DuckDB catalog without manual DDL management.
 - 📦 **Multi-Format Scanners**: Native support for **Parquet**, **CSV**, **JSON**, and **XLSX** files.
-- 🔄 **Atomic Snapshots & Table Hot-Swapping**: Publish whole-catalog snapshots (`publishSnapshot`) or update individual tables (`replaceTable`) atomically without race conditions.
+- 🔄 **Atomic Metadata Updates**: Publish whole-catalog snapshots (`publishSnapshot`) or update individual tables (`replaceTable`) atomically. Use `withExclusiveUpdate` to coordinate remote file overwrites with managed queries.
 - 🛡️ **Cache Isolation**: Attaches internal snapshot identifiers (`#duckdb-snapshot=...`) to remote URIs so DuckDB's HTTP/Parquet cache updates without modifying backend URLs.
 - 🔍 **SQL Views Support**: Publish declarative SQL views alongside tables with automatic invalidation and re-binding on updates.
 - 🧵 **Worker-Thread Isolation**: Catalog state validation and metadata resolution run in a Dedicated Worker, keeping the main UI thread responsive.
@@ -140,7 +140,7 @@ const catalog = await InMemoryCatalogController.initialize(
 Query tables and views using standard 3-part or 2-part identifiers:
 
 ```js
-const result = await catalog.connection.query(`
+const result = await catalog.query(`
   SELECT event_name, COUNT(*) AS count
   FROM app.analytics.login_events
   GROUP BY event_name

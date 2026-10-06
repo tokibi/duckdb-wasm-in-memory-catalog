@@ -79,6 +79,22 @@ await catalog.publishSnapshot(nextSnapshot)
 
 ---
 
+## クエリの実行中にファイルを上書きする
+
+読み取りには `catalog.query` を使い、ファイル本体とメタデータの更新を1つの排他的なコールバックにまとめます。
+
+```js
+await catalog.withExclusiveUpdate(async (update) => {
+  await storage.overwrite(fileId, parquetBytes)
+  await update.replaceTable('main', {
+    ...currentTable,
+    snapshot: nextSnapshotId,
+  })
+})
+```
+
+先行するクエリが完了してからファイルを書き換え、メタデータ更新が終わるまで後続のクエリを待たせます。コールバック内のカタログ操作には渡された `update` だけを使い、メタデータを少なくとも1回更新してください。コールバックや更新が失敗した場合、クエリを停止します。コントローラーを閉じ、ファイルとメタデータを修復して、新しいコントローラーを初期化してください。生のコネクションや、別のタブ・コントローラー・外部アプリの操作は調整しません。詳細は [API リファレンス](./reference.md#catalogwithexclusiveupdatecallback)を参照してください。
+
 ## レシピ 3: 単一テーブルを置換する (`replaceTable`)
 
 他のテーブルを再検証・再送することなく、指定したテーブルのファイルリストやスキーマ、スナップショットIDだけを部分更新できます。
@@ -153,9 +169,9 @@ GROUP BY email;
 `USE` コマンドでデフォルトのカタログ・スキーマを指定すると、テーブル名だけでクエリ可能です：
 
 ```js
-await catalog.connection.query('USE app.main')
+await catalog.query('USE app.main')
 
-const res = await catalog.connection.query(`
+const res = await catalog.query(`
   SELECT * FROM active_users LIMIT 10
 `)
 ```

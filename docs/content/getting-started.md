@@ -173,7 +173,7 @@ const catalog = await InMemoryCatalogController.initialize(
 Query your published tables using standard 3-part identifiers:
 
 ```js
-const result = await catalog.connection.query(`
+const result = await catalog.query(`
   SELECT category, total
   FROM app.analytics.category_totals
   ORDER BY category

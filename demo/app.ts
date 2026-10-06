@@ -329,9 +329,7 @@ async function initializeCatalog(database, worker, catalogName, catalogSnapshot)
 
     const defaultSchema = firstSchemaName(catalogSnapshot);
     if (defaultSchema) {
-      await catalog.connection.query(
-        `USE ${quoteIdentifier(catalogName)}.${quoteIdentifier(defaultSchema)}`,
-      );
+      await catalog.query(`USE ${quoteIdentifier(catalogName)}.${quoteIdentifier(defaultSchema)}`);
     }
 
     return {
@@ -505,7 +503,7 @@ async function runDemo() {
     await ensureCatalog(catalogName, catalogSnapshot);
 
     setStep("query", "active", "Executing SQL");
-    const result = await activeRuntime.catalog.connection.query(sql);
+    const result = await activeRuntime.catalog.query(sql);
     const catalogDiagnostics = await activeRuntime.catalog.diagnostics();
 
     const rowCount = renderResult(result);

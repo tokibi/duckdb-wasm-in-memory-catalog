@@ -112,7 +112,7 @@ DuckDB コネクションを作成し、拡張機能をロードして初期ス�
 | `catalogName` | **必須** | — | DuckDB 内で利用するカタログ名。 |
 | `extension` | 任意 | `{ name: 'in_memory_catalog' }` | 拡張機能のロード設定。`url` による直接ロード、または `name` と `repository` によるインストールを指定。 |
 | `ackTimeoutMs` | 任意 | `5000` | Worker からの応答待ちタイムアウト。ミリ秒単位。 |
-| `onRecoveryRequired` | 任意 | — | クリーンアップ失敗時などの復旧要請コールバック。 |
+| `onRecoveryRequired` | 任意 | — | 排他的な更新やクリーンアップの失敗時に呼ばれる復旧要請コールバック。 |
 
 ---
 
@@ -129,9 +129,35 @@ DuckDB-Wasm とカタログメタデータストアが同居する Dedicated Wor
 
 ---
 
+### `catalog.query(sql)`
+
+カタログを attach したコネクションでクエリを実行し、全結果を取得してから返します。クエリ、メタデータ操作、排他的な更新は、コントローラーごとの共通キューで呼び出し順に実行されます。戻り値は元のコネクションのクエリ結果（Arrow Table など）です。
+
+### `catalog.withExclusiveUpdate(callback)`
+
+先に受け付けた操作の完了を待ってからコールバックを実行します。コールバックと、その中で登録したメタデータ操作が完了するまで、後続のクエリを待機させます。
+
+```js
+await catalog.withExclusiveUpdate(async (update) => {
+  await storage.overwrite(fileId, parquetBytes)
+  await update.replaceTable('analytics', {
+    ...currentTable,
+    snapshot: nextSnapshotId,
+  })
+})
+```
+
+コールバックには `publishSnapshot`、`replaceTable`、`replaceView` を持つ `update` が渡されます。引数はコントローラーの同名メソッドと同じです。ファイル本体の更新をコールバック内で行い、変更した各テーブルの `snapshot` を新しい値にしてメタデータを更新します。コールバックの戻り値は `withExclusiveUpdate` の戻り値になります。
+
+- コールバック内では渡された `update` を使ってください。**`catalog.query`、`diagnostics`、`close`、別の `withExclusiveUpdate` を呼んで待たないでください。** これらは現在のコールバックの終了を待つため、互いに待機したままになります。コントローラー直接のメタデータ更新メソッドは、排他的な更新中はエラーになります。
+- メタデータの更新を少なくとも1回成功させる必要があります。`update` はコールバック終了後には使えません。登録済みの操作は `await` されていなくても完了を待ちますが、アプリケーションでは順序を明確にするため `await` してください。
+- コールバックやメタデータ更新が失敗すると `state` が `failed_closed` になり、`onRecoveryRequired` が呼ばれます。コールバック内で更新エラーを捕捉しても再開しません。元のエラーを返し、待機中および新しいクエリは `RC_CATALOG_RECOVERY_REQUIRED` で拒否します。
+- ファイル本体の更新はロールバックしません。復旧時はこのコントローラーを閉じ、ファイルとメタデータを修復してから、整合したスナップショットで新しいコントローラーを初期化してください。失敗したコントローラーを再開する API はありません。
+- 保証対象は同じコントローラーに渡した操作です。生のコネクション、ストリーミング、prepared statement、別のコントローラーやタブ、外部アプリによる更新は対象外です。Gateway や HTTP キャッシュも更新後の内容を返す必要があります。カタログの `snapshot` が切り替えるのは DuckDB 内のキャッシュ識別子です。
+
 ### `catalog.connection`
 
-カタログが attach された DuckDB コネクションインスタンスです。カタログへのクエリはこのコネクションから実行します。
+高度な操作向けの、生の DuckDB コネクションです。ここからのクエリ、ストリーミング、prepared statement はコントローラーのキューを通りません。`withExclusiveUpdate` で保護する読み取りには `catalog.query` を使ってください。
 
 ---
 
@@ -182,7 +208,7 @@ Worker 側のセッション状態、登録テーブル数、内部世代カウ�
 
 ### `catalog.close()`
 
-カタログを DuckDB から detach し、Worker 内のスナップショット状態を破棄します。
+新しい操作を拒否し、受け付け済みの操作が終わってからカタログを detach して Worker 内の状態を破棄します。先行する排他的な更新が失敗した場合、受け付け済みのクエリも実行せずに拒否します。
 
 ---
 
@@ -198,7 +224,9 @@ Worker 側のセッション状態、登録テーブル数、内部世代カウ�
 | `RC_CATALOG_VIEW_NOT_FOUND` | 単一更新の対象ビューが存在しない。 |
 | `RC_REMOTE_IO` | Worker との通信失敗、タイムアウト、不正レスポンス。 |
 | `RC_CATALOG_WORKSPACE_CLOSED` | すでに closed 状態のコントローラーに対して操作を実行した。 |
-| `RC_CATALOG_RECOVERY_REQUIRED` | クリーンアップに失敗し、ランタイムの再作成が必要。 |
+| `RC_CATALOG_RECOVERY_REQUIRED` | 排他的な更新やクリーンアップに失敗し、コントローラーの再作成が必要。 |
+| `RC_CATALOG_UPDATE_SCOPE` | 排他的な更新中にコントローラー直接の更新メソッドを使った、または終了済みの `update` を使った。 |
+| `RC_CATALOG_UPDATE_REQUIRED` | メタデータを更新せずに排他的な更新が終了した。復旧が必要。 |
 | `RC_METADATA_GENERATION_EXHAUSTED` | 内部世代カウンタの上限に達したためワークスペースの再作成が必要。 |
 
 ---

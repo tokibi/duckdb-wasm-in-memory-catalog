@@ -110,6 +110,13 @@ export interface CatalogRecoveryDetails {
   workspaceId: string;
 }
 
+/** Metadata operations available only inside an exclusive update callback. */
+export interface CatalogExclusiveUpdate {
+  publishSnapshot(snapshot: CatalogSnapshot): Promise<void>;
+  replaceTable(schemaName: string, table: CatalogTable): Promise<void>;
+  replaceView(schemaName: string, view: CatalogView): Promise<void>;
+}
+
 export interface CatalogDiagnostics {
   active_workspace_session_count: number;
   retained_workspace_snapshot_count: number;
@@ -223,6 +230,8 @@ export class InMemoryCatalogController<
   #state: "active" | "closing" | "closed" | "failed_closed" = "active";
   #recoveryReported = false;
   #loadedExtensions = new Set<string>();
+  #exclusiveActive = false;
+  #exclusiveFailed = false;
 
   static async initialize<TConnection extends CatalogConnectionLike>(
     db: CatalogDatabase<TConnection>,
@@ -284,6 +293,7 @@ export class InMemoryCatalogController<
     this.#onRecoveryRequired = options.onRecoveryRequired;
   }
 
+  /** Raw connection: operations here bypass the controller's exclusive update queue. */
   get connection(): TConnection {
     return this.#connection;
   }
@@ -292,15 +302,109 @@ export class InMemoryCatalogController<
     return this.#state;
   }
 
-  publishSnapshot(snapshot: CatalogSnapshot): Promise<void> {
-    if (this.#state !== "active") {
+  /** Execute a fully materialized query through the controller's operation queue. */
+  // Public API; Fallow does not resolve calls through initialize()'s generic result.
+  // fallow-ignore-next-line unused-class-member
+  query(sql: string): Promise<Awaited<ReturnType<TConnection["query"]>>> {
+    return this.#enqueue(() => this.#connection.query(sql)) as Promise<
+      Awaited<ReturnType<TConnection["query"]>>
+    >;
+  }
+
+  /**
+   * Wait for managed queries, then exclude them while the host updates files and
+   * publishes metadata through the supplied scope. Failures require closing and
+   * recreating the controller after the host repairs its files and metadata.
+   * Do not await controller operations from the callback; use only the scope.
+   */
+  // Public API for host applications; exercised by the controller concurrency tests.
+  // fallow-ignore-next-line unused-class-member
+  withExclusiveUpdate<T>(callback: (update: CatalogExclusiveUpdate) => T | Promise<T>): Promise<T> {
+    if (typeof callback !== "function") {
       return Promise.reject(
-        new InMemoryCatalogControllerError(
-          "RC_CATALOG_WORKSPACE_CLOSED",
-          "In-Memory Catalog workspace controller is closed",
-        ),
+        new InMemoryCatalogControllerError("RC_METADATA_INVALID", "An update callback is required"),
       );
     }
+    return this.#enqueue(async () => {
+      this.#exclusiveActive = true;
+      let accepting = true;
+      let pending = Promise.resolve();
+      let failed = false;
+      let failure: unknown;
+      let publications = 0;
+      const recordFailure = (error: unknown): void => {
+        if (failed) return;
+        failed = true;
+        failure = error;
+      };
+      const submit = <V>(value: V, apply: (captured: V) => Promise<void>): Promise<void> => {
+        if (!accepting) {
+          return Promise.reject(
+            new InMemoryCatalogControllerError(
+              "RC_CATALOG_UPDATE_SCOPE",
+              "The exclusive update scope has expired",
+            ),
+          );
+        }
+        let captured!: V;
+        try {
+          captured = structuredClone(value);
+        } catch (error) {
+          recordFailure(error);
+        }
+        const operation = pending.then(async () => {
+          if (failed) throw failure;
+          await apply(captured);
+          publications += 1;
+        });
+        // Observe every submitted operation, including ones the callback does not await.
+        pending = operation.catch(recordFailure);
+        return operation;
+      };
+      const update: CatalogExclusiveUpdate = {
+        publishSnapshot: (snapshot) =>
+          submit(snapshot, (value) => this.#publishSnapshot(value, true)),
+        replaceTable: (schemaName, table) =>
+          submit(table, (value) => this.#replaceTable(schemaName, value, true)),
+        replaceView: (schemaName, view) =>
+          submit(view, (value) => this.#replaceView(schemaName, value, true)),
+      };
+      try {
+        let result!: T;
+        try {
+          result = await callback(update);
+        } catch (error) {
+          recordFailure(error);
+        } finally {
+          accepting = false;
+        }
+        await pending;
+        if (failed) throw failure;
+        if (publications === 0) {
+          throw new InMemoryCatalogControllerError(
+            "RC_CATALOG_UPDATE_REQUIRED",
+            "An exclusive update must publish catalog metadata before queries resume",
+          );
+        }
+        return result;
+      } catch (error) {
+        this.#exclusiveFailed = true;
+        this.#state = "failed_closed";
+        this.#reportRecoveryRequired();
+        throw error;
+      } finally {
+        this.#exclusiveActive = false;
+      }
+    });
+  }
+
+  publishSnapshot(snapshot: CatalogSnapshot): Promise<void> {
+    return this.#publishSnapshot(snapshot);
+  }
+
+  #publishSnapshot(snapshot: CatalogSnapshot, scoped = false): Promise<void> {
+    const stateError = this.#metadataStateError(scoped);
+    if (stateError) return Promise.reject(stateError);
     let submittedSnapshot: CatalogSnapshot;
     try {
       submittedSnapshot = structuredClone(snapshot);
@@ -312,7 +416,7 @@ export class InMemoryCatalogController<
         ),
       );
     }
-    const operation = this.#pending.then(async () => {
+    const operation = async () => {
       await this.#ensureRequiredExtensions(submittedSnapshot);
       const result = await this.#session.request(
         "IN_MEMORY_CATALOG_REPLACE_SNAPSHOT",
@@ -320,20 +424,17 @@ export class InMemoryCatalogController<
         { snapshot: submittedSnapshot },
       );
       requireSuccessfulResult(result, "Catalog publication failed");
-    });
-    this.#pending = operation.catch(() => {});
-    return operation;
+    };
+    return this.#submitMetadata(operation, scoped);
   }
 
   replaceTable(schemaName: string, table: CatalogTable): Promise<void> {
-    if (this.#state !== "active") {
-      return Promise.reject(
-        new InMemoryCatalogControllerError(
-          "RC_CATALOG_WORKSPACE_CLOSED",
-          "In-Memory Catalog workspace controller is closed",
-        ),
-      );
-    }
+    return this.#replaceTable(schemaName, table);
+  }
+
+  #replaceTable(schemaName: string, table: CatalogTable, scoped = false): Promise<void> {
+    const stateError = this.#metadataStateError(scoped);
+    if (stateError) return Promise.reject(stateError);
     let submittedSchemaName: string;
     try {
       submittedSchemaName = requireName(schemaName, "schemaName");
@@ -351,7 +452,7 @@ export class InMemoryCatalogController<
         ),
       );
     }
-    const operation = this.#pending.then(async () => {
+    const operation = async () => {
       await this.#ensureRequiredExtensions(submittedTable);
       const result = await this.#session.request(
         "IN_MEMORY_CATALOG_REPLACE_TABLE",
@@ -359,20 +460,17 @@ export class InMemoryCatalogController<
         { schema_name: submittedSchemaName, table: submittedTable },
       );
       requireSuccessfulResult(result, "Catalog table replacement failed");
-    });
-    this.#pending = operation.catch(() => {});
-    return operation;
+    };
+    return this.#submitMetadata(operation, scoped);
   }
 
   replaceView(schemaName: string, view: CatalogView): Promise<void> {
-    if (this.#state !== "active") {
-      return Promise.reject(
-        new InMemoryCatalogControllerError(
-          "RC_CATALOG_WORKSPACE_CLOSED",
-          "In-Memory Catalog workspace controller is closed",
-        ),
-      );
-    }
+    return this.#replaceView(schemaName, view);
+  }
+
+  #replaceView(schemaName: string, view: CatalogView, scoped = false): Promise<void> {
+    const stateError = this.#metadataStateError(scoped);
+    if (stateError) return Promise.reject(stateError);
     let submittedSchemaName: string;
     try {
       submittedSchemaName = requireName(schemaName, "schemaName");
@@ -390,16 +488,15 @@ export class InMemoryCatalogController<
         ),
       );
     }
-    const operation = this.#pending.then(async () => {
+    const operation = async () => {
       const result = await this.#session.request(
         "IN_MEMORY_CATALOG_REPLACE_VIEW",
         "IN_MEMORY_CATALOG_REPLACE_VIEW_RESULT",
         { schema_name: submittedSchemaName, view: submittedView },
       );
       requireSuccessfulResult(result, "Catalog view replacement failed");
-    });
-    this.#pending = operation.catch(() => {});
-    return operation;
+    };
+    return this.#submitMetadata(operation, scoped);
   }
 
   diagnostics(): Promise<CatalogDiagnostics> {
@@ -411,7 +508,7 @@ export class InMemoryCatalogController<
         ),
       );
     }
-    return this.#pending.then(async () => {
+    return this.#enqueue(async () => {
       const result = await this.#session.request(
         "IN_MEMORY_CATALOG_GET_DIAGNOSTICS",
         "IN_MEMORY_CATALOG_GET_DIAGNOSTICS_RESULT",
@@ -426,6 +523,56 @@ export class InMemoryCatalogController<
     this.#state = "closing";
     this.#closePromise = this.#performClose();
     return this.#closePromise;
+  }
+
+  #metadataStateError(scoped: boolean): InMemoryCatalogControllerError | undefined {
+    if (scoped || this.#state === "active") return undefined;
+    return new InMemoryCatalogControllerError(
+      "RC_CATALOG_WORKSPACE_CLOSED",
+      "In-Memory Catalog workspace controller is closed",
+    );
+  }
+
+  #submitMetadata(operation: () => Promise<void>, scoped: boolean): Promise<void> {
+    if (scoped) return operation();
+    if (this.#exclusiveActive) {
+      return Promise.reject(
+        new InMemoryCatalogControllerError(
+          "RC_CATALOG_UPDATE_SCOPE",
+          "Use the supplied update scope while an exclusive update is running",
+        ),
+      );
+    }
+    return this.#enqueue(operation);
+  }
+
+  #enqueue<T>(run: () => Promise<T>): Promise<T> {
+    if (this.#exclusiveFailed) return Promise.reject(this.#exclusiveRecoveryError());
+    if (this.#state !== "active") {
+      return Promise.reject(
+        new InMemoryCatalogControllerError(
+          "RC_CATALOG_WORKSPACE_CLOSED",
+          "In-Memory Catalog workspace controller is closed",
+        ),
+      );
+    }
+    const operation = this.#pending.then(() => {
+      // Accepted work may drain during close, but must never run after a failed update.
+      if (this.#exclusiveFailed) throw this.#exclusiveRecoveryError();
+      return run();
+    });
+    this.#pending = operation.then(
+      () => {},
+      () => {},
+    );
+    return operation;
+  }
+
+  #exclusiveRecoveryError(): InMemoryCatalogControllerError {
+    return new InMemoryCatalogControllerError(
+      "RC_CATALOG_RECOVERY_REQUIRED",
+      "An exclusive update failed; repair the files and metadata, then recreate the controller",
+    );
   }
 
   async #performClose(): Promise<void> {

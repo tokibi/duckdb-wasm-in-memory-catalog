@@ -79,6 +79,22 @@ await catalog.publishSnapshot(nextSnapshot)
 
 ---
 
+## Overwriting a File While Queries May Be Running
+
+Submit reads through `catalog.query`. Enclose both the remote write and metadata update in one exclusive callback:
+
+```js
+await catalog.withExclusiveUpdate(async (update) => {
+  await storage.overwrite(fileId, parquetBytes)
+  await update.replaceTable('main', {
+    ...currentTable,
+    snapshot: nextSnapshotId,
+  })
+})
+```
+
+Existing managed queries finish before the write starts; subsequent queries wait until publication finishes. Use only the supplied `update` methods for catalog operations inside the callback. At least one publication is required. Any callback or publication failure blocks managed queries until you close the controller, repair the files and metadata, and initialize a new controller. This does not coordinate raw connection calls, other tabs/controllers, or external writers. See the [API reference](./reference.md#catalogwithexclusiveupdatecallback) for scope and recovery details.
+
 ## Recipe 3: Hot-Swap a Single Table (`replaceTable`)
 
 To update a single table's files or schema without disturbing other tables or re-validating the entire catalog:
@@ -153,9 +169,9 @@ GROUP BY email;
 Use `USE` to set the default catalog and schema for simpler queries:
 
 ```js
-await catalog.connection.query('USE app.main')
+await catalog.query('USE app.main')
 
-const res = await catalog.connection.query(`
+const res = await catalog.query(`
   SELECT * FROM active_users LIMIT 10
 `)
 ```
