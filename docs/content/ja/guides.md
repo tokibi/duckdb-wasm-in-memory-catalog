@@ -81,7 +81,7 @@ await catalog.publishSnapshot(nextSnapshot)
 
 ## クエリの実行中にファイルを上書きする
 
-読み取りには `catalog.query` を使い、ファイル本体とメタデータの更新を1つの排他的なコールバックにまとめます。
+読み取りには `catalog.connection.query(sql)` など、通常の DuckDB コネクションを使えます。ファイル本体とメタデータの更新を1つの排他的なコールバックにまとめます。
 
 ```js
 await catalog.withExclusiveUpdate(async (update) => {
@@ -93,7 +93,7 @@ await catalog.withExclusiveUpdate(async (update) => {
 })
 ```
 
-先行するクエリが完了してからファイルを書き換え、コールバックと登録済みのメタデータ更新が終わるまで後続のクエリを待たせます。コールバック内のカタログ操作には渡された `update` だけを使ってください。更新が不要なら、メタデータを更新せずに終了できます。ファイルを変更した場合は、上の例のように対象テーブルの `snapshot` を更新してください。コールバックや更新が失敗した場合、クエリを停止します。コントローラーを閉じ、ファイルとメタデータを修復して、新しいコントローラーを初期化してください。生のコネクションや、別のタブ・コントローラー・外部アプリの操作は調整しません。詳細は [API リファレンス](./reference.md#catalogwithexclusiveupdatecallback)を参照してください。
+先行する通常のクエリが完了してからファイルを書き換え、コールバックと登録済みのメタデータ更新が終わるまで、同じ Worker の全コネクションの後続クエリを待たせます。コールバック内のカタログ操作には渡された `update` だけを使い、DuckDB のクエリを呼んで待たないでください。更新が不要なら、メタデータを更新せずに終了できます。ファイルを変更した場合は、上の例のように対象テーブルの `snapshot` を更新してください。読み取り中のストリームがある場合は、更新を開始せずに拒否します。読み取りを完了またはキャンセルしてから再試行してください。更新中の新しいストリーム開始も拒否します。コールバックや更新に失敗した場合は DuckDB 操作を停止するため、ファイルとメタデータを修復して Worker とコントローラーを再作成してください。別の Worker・タブ・外部アプリの操作は調整しません。詳細は [API リファレンス](./reference.md#catalogwithexclusiveupdatecallback)を参照してください。
 
 ## レシピ 3: 単一テーブルを置換する (`replaceTable`)
 
@@ -169,9 +169,9 @@ GROUP BY email;
 `USE` コマンドでデフォルトのカタログ・スキーマを指定すると、テーブル名だけでクエリ可能です：
 
 ```js
-await catalog.query('USE app.main')
+await catalog.connection.query('USE app.main')
 
-const res = await catalog.query(`
+const res = await catalog.connection.query(`
   SELECT * FROM active_users LIMIT 10
 `)
 ```

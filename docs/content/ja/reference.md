@@ -135,7 +135,7 @@ DuckDB-Wasm とカタログメタデータストアが同居する Dedicated Wor
 
 ### `catalog.withExclusiveUpdate(callback)`
 
-先に受け付けた操作の完了を待ってからコールバックを実行します。コールバックと、その中で登録したメタデータ操作が完了するまで、後続のクエリを待機させます。
+実行中の DuckDB リクエストが完了してから、カタログ Worker 内の排他ロックを取得してコールバックを実行します。コールバックと、その中で登録したメタデータ操作が完了するまで、通常のクエリを待機させます。同じ Worker 内の別のコネクションや prepared statement のクエリも対象です。
 
 ```js
 await catalog.withExclusiveUpdate(async (update) => {
@@ -149,15 +149,17 @@ await catalog.withExclusiveUpdate(async (update) => {
 
 コールバックには `publishSnapshot`、`replaceTable`、`replaceView` を持つ `update` が渡されます。引数はコントローラーの同名メソッドと同じです。ファイル本体の更新をコールバック内で行い、変更した各テーブルの `snapshot` を新しい値にしてメタデータを更新します。コールバックの戻り値は `withExclusiveUpdate` の戻り値になります。
 
-- コールバック内では渡された `update` を使ってください。**`catalog.query`、`diagnostics`、`close`、別の `withExclusiveUpdate` を呼んで待たないでください。** これらは現在のコールバックの終了を待つため、互いに待機したままになります。コントローラー直接のメタデータ更新メソッドは、排他的な更新中はエラーになります。
+- コールバック内では渡された `update` を使ってください。**DuckDB のクエリ、`catalog.query`、`diagnostics`、`close`、別の `withExclusiveUpdate` を呼んで待たないでください。** これらは現在のコールバックの終了を待つため、互いに待機したままになります。コントローラー直接のメタデータ更新メソッドは、排他的な更新中はエラーになります。
 - 更新が不要な場合など、メタデータを更新せずにコールバックを終了できます。正常終了するとクエリを再開します。`update` はコールバック終了後には使えません。登録済みの操作は `await` されていなくても完了を待ちますが、アプリケーションでは順序を明確にするため `await` してください。
 - コールバックやメタデータ更新が失敗すると `state` が `failed_closed` になり、`onRecoveryRequired` が呼ばれます。コールバック内で更新エラーを捕捉しても再開しません。元のエラーを返し、待機中および新しいクエリは `RC_CATALOG_RECOVERY_REQUIRED` で拒否します。
-- ファイル本体の更新はロールバックしません。復旧時はこのコントローラーを閉じ、ファイルとメタデータを修復してから、整合したスナップショットで新しいコントローラーを初期化してください。失敗したコントローラーを再開する API はありません。
-- 保証対象は同じコントローラーに渡した操作です。生のコネクション、ストリーミング、prepared statement、別のコントローラーやタブ、外部アプリによる更新は対象外です。Gateway や HTTP キャッシュも更新後の内容を返す必要があります。カタログの `snapshot` が切り替えるのは DuckDB 内のキャッシュ識別子です。
+- ファイル本体の更新はロールバックしません。コールバックやメタデータ更新に失敗すると、その Worker の DuckDB 操作を停止します。復旧時はコントローラーを閉じ、ファイルとメタデータを修復してから、DuckDB Worker とコントローラーを再作成してください。失敗した Worker を再開する API はありません。
+- 読み取り中のストリームや pending query がある場合、コールバックを実行せずに排他更新を拒否します。読み取りを完了またはキャンセルしてから再試行してください。排他更新の待機中・実行中に新しいストリームを開始する操作も拒否します。既存のストリームの fetch/cancel は引き続き利用できます。
+- Worker ごとに待機中・実行中の排他更新は1つです。別のコントローラーの更新が重なると、コールバックを実行せずに `RC_CATALOG_UPDATE_BUSY` を返します。先行する更新が終わってから再試行してください。標準 DuckDB-Wasm コネクションの `useUnsafe` による識別子取得を必要とし、これを持たない独自アダプターには `RC_CATALOG_WORKER_GATE_UNAVAILABLE` を返します。
+- 保証対象は同じカタログ Worker を使うコネクションとコントローラーです。別の Worker・タブ・外部アプリによる更新は対象外です。Gateway や HTTP キャッシュも更新後の内容を返す必要があります。カタログの `snapshot` が切り替えるのは DuckDB 内のキャッシュ識別子です。
 
 ### `catalog.connection`
 
-高度な操作向けの、生の DuckDB コネクションです。ここからのクエリ、ストリーミング、prepared statement はコントローラーのキューを通りません。`withExclusiveUpdate` で保護する読み取りには `catalog.query` を使ってください。
+カタログを attach した DuckDB コネクションです。通常の `query` と prepared statement の `query` は Worker の排他制御で保護されます。同じ Worker の別のコネクションも対象です。`catalog.query` は、コントローラーの操作キューにも参加する任意の便利メソッドとして利用できます。ストリーミングには上記の制約があります。
 
 ---
 
@@ -224,8 +226,11 @@ Worker 側のセッション状態、登録テーブル数、内部世代カウ�
 | `RC_CATALOG_VIEW_NOT_FOUND` | 単一更新の対象ビューが存在しない。 |
 | `RC_REMOTE_IO` | Worker との通信失敗、タイムアウト、不正レスポンス。 |
 | `RC_CATALOG_WORKSPACE_CLOSED` | すでに closed 状態のコントローラーに対して操作を実行した。 |
-| `RC_CATALOG_RECOVERY_REQUIRED` | 排他的な更新やクリーンアップに失敗し、コントローラーの再作成が必要。 |
+| `RC_CATALOG_RECOVERY_REQUIRED` | 排他的な更新やクリーンアップに失敗し、Worker とコントローラーの再作成が必要。 |
 | `RC_CATALOG_UPDATE_SCOPE` | 排他的な更新中にコントローラー直接の更新メソッドを使った、または終了済みの `update` を使った。 |
+| `RC_CATALOG_STREAM_ACTIVE` | 読み取り中のストリームが更新を妨げた、または更新中にストリームを開始した。 |
+| `RC_CATALOG_UPDATE_BUSY` | 同じ Worker の別のコントローラーが更新を待機中または実行中。 |
+| `RC_CATALOG_WORKER_GATE_UNAVAILABLE` | コネクションが Worker の排他制御に必要な識別子を公開していない。 |
 | `RC_METADATA_GENERATION_EXHAUSTED` | 内部世代カウンタの上限に達したためワークスペースの再作成が必要。 |
 
 ---

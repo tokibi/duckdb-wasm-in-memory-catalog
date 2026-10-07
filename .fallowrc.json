@@ -2,7 +2,7 @@
   "$schema": "https://raw.githubusercontent.com/fallow-rs/fallow/main/schema.json",
   "entry": [
     "demo/index.html",
-    "demo/in-memory-catalog-worker.ts",
+    "src/javascript/in-memory-catalog-worker.ts",
     "examples/quickstart/index.html"
   ],
   "ignoreUnresolvedImports": [

@@ -129,6 +129,8 @@ export interface CatalogDiagnostics {
 export interface CatalogConnectionLike {
   query(sql: string): Promise<unknown>;
   close(): Promise<void>;
+  /** DuckDB-Wasm's connection identifier accessor, needed for Worker-scoped updates. */
+  useUnsafe?<R>(callback: (bindings: unknown, connectionId: number) => R): R;
 }
 
 /** The subset of DuckDB-Wasm used to open the managed connection. */
@@ -232,6 +234,9 @@ export class InMemoryCatalogController<
   #loadedExtensions = new Set<string>();
   #exclusiveActive = false;
   #exclusiveFailed = false;
+  #connectionId: number | undefined;
+  #exclusiveToken: string | undefined;
+  #updateSequence = 0;
 
   static async initialize<TConnection extends CatalogConnectionLike>(
     db: CatalogDatabase<TConnection>,
@@ -258,6 +263,7 @@ export class InMemoryCatalogController<
         worker,
         normalized.workspaceId,
         normalized.ackTimeoutMs,
+        connection.useUnsafe?.((_bindings, connectionId) => connectionId),
       );
       controller = new InMemoryCatalogController(connection, session, normalized);
       await controller.publishSnapshot(initialSnapshot);
@@ -291,13 +297,18 @@ export class InMemoryCatalogController<
     this.#workspaceId = options.workspaceId;
     this.#catalogName = options.catalogName;
     this.#onRecoveryRequired = options.onRecoveryRequired;
+    this.#connectionId = connection.useUnsafe?.((_bindings, connectionId) => connectionId);
   }
 
-  /** Raw connection: operations here bypass the controller's exclusive update queue. */
+  /** Normal DuckDB connection. The shared Worker protects its materialized queries. */
+  // Public API used by the demo; Fallow cannot resolve initialize()'s generic result.
+  // fallow-ignore-next-line unused-class-member
   get connection(): TConnection {
     return this.#connection;
   }
 
+  // Public API exercised by the controller lifecycle tests.
+  // fallow-ignore-next-line unused-class-member
   get state(): "active" | "closing" | "closed" | "failed_closed" {
     return this.#state;
   }
@@ -312,10 +323,10 @@ export class InMemoryCatalogController<
   }
 
   /**
-   * Wait for managed queries, then exclude them while the host updates files and
+   * Wait for materialized queries on the shared Worker, then exclude new starts while the host updates files and
    * publishes metadata through the supplied scope. Failures require closing and
-   * recreating the controller after the host repairs its files and metadata.
-   * Do not await controller operations from the callback; use only the scope.
+   * recreating the Worker after the host repairs its files and metadata.
+   * Do not query DuckDB from the callback; use only the scoped metadata operations.
    */
   // Public API for host applications; exercised by the controller concurrency tests.
   // fallow-ignore-next-line unused-class-member
@@ -326,6 +337,7 @@ export class InMemoryCatalogController<
       );
     }
     return this.#enqueue(async () => {
+      await this.#acquireUpdate();
       this.#exclusiveActive = true;
       let accepting = true;
       let pending = Promise.resolve();
@@ -378,10 +390,16 @@ export class InMemoryCatalogController<
         }
         await pending;
         if (failed) throw failure;
+        await this.#finishUpdate(false);
         return result;
       } catch (error) {
         this.#exclusiveFailed = true;
         this.#state = "failed_closed";
+        try {
+          await this.#finishUpdate(true);
+        } catch {
+          // Preserve the original failure; recovery requires replacing the Worker.
+        }
         this.#reportRecoveryRequired();
         throw error;
       } finally {
@@ -409,88 +427,88 @@ export class InMemoryCatalogController<
       );
     }
     const operation = async () => {
-      await this.#ensureRequiredExtensions(submittedSnapshot);
+      await this.#ensureRequiredExtensions(submittedSnapshot, scoped);
       const result = await this.#session.request(
         "IN_MEMORY_CATALOG_REPLACE_SNAPSHOT",
         "IN_MEMORY_CATALOG_REPLACE_SNAPSHOT_RESULT",
-        { snapshot: submittedSnapshot },
+        { snapshot: submittedSnapshot, ...(scoped ? { update_token: this.#exclusiveToken } : {}) },
       );
       requireSuccessfulResult(result, "Catalog publication failed");
     };
     return this.#submitMetadata(operation, scoped);
   }
 
+  // Public API exercised by the table replacement tests and browser example.
+  // fallow-ignore-next-line unused-class-member
   replaceTable(schemaName: string, table: CatalogTable): Promise<void> {
     return this.#replaceTable(schemaName, table);
   }
 
   #replaceTable(schemaName: string, table: CatalogTable, scoped = false): Promise<void> {
-    const stateError = this.#metadataStateError(scoped);
-    if (stateError) return Promise.reject(stateError);
     let submittedSchemaName: string;
+    let submittedTable: CatalogTable;
     try {
-      submittedSchemaName = requireName(schemaName, "schemaName");
+      ({ schemaName: submittedSchemaName, value: submittedTable } = this.#captureNamedMetadata(
+        schemaName,
+        table,
+        "table",
+        scoped,
+      ));
     } catch (error) {
       return Promise.reject(error);
     }
-    let submittedTable: CatalogTable;
-    try {
-      submittedTable = structuredClone(table);
-    } catch {
-      return Promise.reject(
-        new InMemoryCatalogControllerError(
-          "RC_METADATA_INVALID",
-          "Catalog table must be structured-cloneable",
-        ),
-      );
-    }
     const operation = async () => {
-      await this.#ensureRequiredExtensions(submittedTable);
+      await this.#ensureRequiredExtensions(submittedTable, scoped);
       const result = await this.#session.request(
         "IN_MEMORY_CATALOG_REPLACE_TABLE",
         "IN_MEMORY_CATALOG_REPLACE_TABLE_RESULT",
-        { schema_name: submittedSchemaName, table: submittedTable },
+        {
+          schema_name: submittedSchemaName,
+          table: submittedTable,
+          ...(scoped ? { update_token: this.#exclusiveToken } : {}),
+        },
       );
       requireSuccessfulResult(result, "Catalog table replacement failed");
     };
     return this.#submitMetadata(operation, scoped);
   }
 
+  // Public API exercised by the view replacement tests.
+  // fallow-ignore-next-line unused-class-member
   replaceView(schemaName: string, view: CatalogView): Promise<void> {
     return this.#replaceView(schemaName, view);
   }
 
   #replaceView(schemaName: string, view: CatalogView, scoped = false): Promise<void> {
-    const stateError = this.#metadataStateError(scoped);
-    if (stateError) return Promise.reject(stateError);
     let submittedSchemaName: string;
-    try {
-      submittedSchemaName = requireName(schemaName, "schemaName");
-    } catch (error) {
-      return Promise.reject(error);
-    }
     let submittedView: CatalogView;
     try {
-      submittedView = structuredClone(view);
-    } catch {
-      return Promise.reject(
-        new InMemoryCatalogControllerError(
-          "RC_METADATA_INVALID",
-          "Catalog view must be structured-cloneable",
-        ),
-      );
+      ({ schemaName: submittedSchemaName, value: submittedView } = this.#captureNamedMetadata(
+        schemaName,
+        view,
+        "view",
+        scoped,
+      ));
+    } catch (error) {
+      return Promise.reject(error);
     }
     const operation = async () => {
       const result = await this.#session.request(
         "IN_MEMORY_CATALOG_REPLACE_VIEW",
         "IN_MEMORY_CATALOG_REPLACE_VIEW_RESULT",
-        { schema_name: submittedSchemaName, view: submittedView },
+        {
+          schema_name: submittedSchemaName,
+          view: submittedView,
+          ...(scoped ? { update_token: this.#exclusiveToken } : {}),
+        },
       );
       requireSuccessfulResult(result, "Catalog view replacement failed");
     };
     return this.#submitMetadata(operation, scoped);
   }
 
+  // Public API used by the demo; Fallow cannot resolve initialize()'s generic result.
+  // fallow-ignore-next-line unused-class-member
   diagnostics(): Promise<CatalogDiagnostics> {
     if (this.#state !== "active") {
       return Promise.reject(
@@ -523,6 +541,79 @@ export class InMemoryCatalogController<
       "RC_CATALOG_WORKSPACE_CLOSED",
       "In-Memory Catalog workspace controller is closed",
     );
+  }
+
+  #captureNamedMetadata<T>(
+    schemaName: string,
+    value: T,
+    kind: "table" | "view",
+    scoped: boolean,
+  ): { schemaName: string; value: T } {
+    const stateError = this.#metadataStateError(scoped);
+    if (stateError) throw stateError;
+    const capturedName = requireName(schemaName, "schemaName");
+    try {
+      return { schemaName: capturedName, value: structuredClone(value) };
+    } catch {
+      throw new InMemoryCatalogControllerError(
+        "RC_METADATA_INVALID",
+        `Catalog ${kind} must be structured-cloneable`,
+      );
+    }
+  }
+
+  async #acquireUpdate(): Promise<void> {
+    if (!Number.isSafeInteger(this.#connectionId)) {
+      throw new InMemoryCatalogControllerError(
+        "RC_CATALOG_WORKER_GATE_UNAVAILABLE",
+        "Exclusive updates require the DuckDB-Wasm connection useUnsafe identifier accessor",
+      );
+    }
+    const token = `update-${++this.#updateSequence}`;
+    try {
+      const result = await this.#session.request(
+        "IN_MEMORY_CATALOG_ACQUIRE_UPDATE",
+        "IN_MEMORY_CATALOG_ACQUIRE_UPDATE_RESULT",
+        { update_token: token },
+      );
+      requireSuccessfulResult(result, "Could not acquire the Worker update gate");
+      this.#exclusiveToken = token;
+    } catch (error) {
+      if (
+        error instanceof InMemoryCatalogControllerError &&
+        error.code === "RC_CATALOG_RECOVERY_REQUIRED"
+      ) {
+        this.#exclusiveFailed = true;
+        this.#state = "failed_closed";
+        this.#reportRecoveryRequired();
+        throw error;
+      }
+      // A timed-out acquire may still receive a late grant. Cancel it on the same
+      // ordered port before allowing another attempt; never invoke the host callback.
+      try {
+        const result = await this.#session.request(
+          "IN_MEMORY_CATALOG_CANCEL_UPDATE",
+          "IN_MEMORY_CATALOG_CANCEL_UPDATE_RESULT",
+          { update_token: token },
+        );
+        requireSuccessfulResult(result, "Could not cancel the Worker gate acquisition");
+      } catch {
+        this.#exclusiveFailed = true;
+        this.#state = "failed_closed";
+        this.#reportRecoveryRequired();
+      }
+      throw error;
+    }
+  }
+
+  async #finishUpdate(failed: boolean): Promise<void> {
+    if (!this.#exclusiveToken) return;
+    const type = failed ? "IN_MEMORY_CATALOG_FAIL_UPDATE" : "IN_MEMORY_CATALOG_RELEASE_UPDATE";
+    const result = await this.#session.request(type, `${type}_RESULT`, {
+      update_token: this.#exclusiveToken,
+    });
+    requireSuccessfulResult(result, "Could not release the Worker update gate");
+    this.#exclusiveToken = undefined;
   }
 
   #submitMetadata(operation: () => Promise<void>, scoped: boolean): Promise<void> {
@@ -563,7 +654,7 @@ export class InMemoryCatalogController<
   #exclusiveRecoveryError(): InMemoryCatalogControllerError {
     return new InMemoryCatalogControllerError(
       "RC_CATALOG_RECOVERY_REQUIRED",
-      "An exclusive update failed; repair the files and metadata, then recreate the controller",
+      "An exclusive update failed; repair the files and metadata, then recreate the DuckDB Worker",
     );
   }
 
@@ -571,7 +662,7 @@ export class InMemoryCatalogController<
     await this.#pending;
     let failure: InMemoryCatalogControllerError | undefined;
     try {
-      if (this.#attached) {
+      if (this.#attached && !this.#exclusiveFailed) {
         await this.#connection.query(`DETACH ${quoteIdentifier(this.#catalogName)}`);
         this.#attached = false;
       }
@@ -619,10 +710,22 @@ export class InMemoryCatalogController<
     }
   }
 
-  async #ensureRequiredExtensions(metadata: CatalogSnapshot | CatalogTable): Promise<void> {
+  async #ensureRequiredExtensions(
+    metadata: CatalogSnapshot | CatalogTable,
+    scoped = false,
+  ): Promise<void> {
     for (const extension of requiredExtensions(metadata)) {
       if (this.#loadedExtensions.has(extension)) continue;
-      await this.#connection.query(`LOAD ${extension}`);
+      if (scoped) {
+        const result = await this.#session.request(
+          "IN_MEMORY_CATALOG_LOAD_EXTENSION",
+          "IN_MEMORY_CATALOG_LOAD_EXTENSION_RESULT",
+          { update_token: this.#exclusiveToken, extension },
+        );
+        requireSuccessfulResult(result, "Could not load a scanner extension during the update");
+      } else {
+        await this.#connection.query(`LOAD ${extension}`);
+      }
       this.#loadedExtensions.add(extension);
     }
   }
@@ -670,6 +773,7 @@ class WorkspaceSessionClient {
     worker: CatalogWorkerLike,
     workspaceId: string,
     ackTimeoutMs: number,
+    connectionId?: number,
   ): Promise<WorkspaceSessionClient> {
     const channel = new MessageChannel();
     const client = new WorkspaceSessionClient(channel.port1, ackTimeoutMs);
@@ -679,6 +783,7 @@ class WorkspaceSessionClient {
         {
           type: "IN_MEMORY_CATALOG_OPEN_WORKSPACE_SESSION",
           workspace_id: workspaceId,
+          connection_id: connectionId,
         },
         [channel.port2],
       );

@@ -28,6 +28,9 @@ describe("In-Memory Catalog Worker entrypoint", () => {
         InMemoryCatalogMetadataStore: class InMemoryCatalogMetadataStore {},
       },
       DuckDBInMemoryCatalogWorkerRuntime: {
+        createDuckDBQueryGate(dispatch) {
+          return { handleMessage: dispatch, observeResponse: () => true };
+        },
         createInMemoryCatalogWorkerRuntime() {
           return {
             bridge: {},

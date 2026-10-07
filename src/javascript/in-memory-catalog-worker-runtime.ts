@@ -1,3 +1,5 @@
+import { createDuckDBQueryGate } from "./in-memory-catalog-query-gate";
+
 (function initializeInMemoryCatalogWorkerRuntime(global) {
   "use strict";
 
@@ -7,8 +9,15 @@
   const REPLACE_VIEW = "IN_MEMORY_CATALOG_REPLACE_VIEW";
   const DROP_WORKSPACE = "IN_MEMORY_CATALOG_DROP_WORKSPACE";
   const GET_DIAGNOSTICS = "IN_MEMORY_CATALOG_GET_DIAGNOSTICS";
+  const GATE_MESSAGES = new Set([
+    "IN_MEMORY_CATALOG_ACQUIRE_UPDATE",
+    "IN_MEMORY_CATALOG_RELEASE_UPDATE",
+    "IN_MEMORY_CATALOG_CANCEL_UPDATE",
+    "IN_MEMORY_CATALOG_FAIL_UPDATE",
+    "IN_MEMORY_CATALOG_LOAD_EXTENSION",
+  ]);
 
-  function createInMemoryCatalogWorkerRuntime(store) {
+  function createInMemoryCatalogWorkerRuntime(store, gate = createDuckDBQueryGate()) {
     const bridge = Object.freeze({
       currentRevision(workspaceId) {
         return store.currentRevision(workspaceId)?.toString();
@@ -77,8 +86,13 @@
         return;
       }
 
-      port.onmessage = (sessionEvent) => handleSessionMessage(session, port, sessionEvent.data);
-      port.onmessageerror = () => port.close();
+      const owner = { connectionId: event.data.connection_id };
+      port.onmessage = (sessionEvent) =>
+        handleSessionMessage(session, port, sessionEvent.data, gate, owner);
+      port.onmessageerror = () => {
+        gate.abandon(owner);
+        port.close();
+      };
       port.start?.();
       port.postMessage({ type: "IN_MEMORY_CATALOG_WORKSPACE_SESSION_OPENED", ok: true });
     }
@@ -86,11 +100,17 @@
     return Object.freeze({ bridge, handleMessage });
   }
 
-  async function handleSessionMessage(session, port, message) {
+  async function handleSessionMessage(session, port, message, gate, owner) {
     const requestId = message?.request_id;
+    if (GATE_MESSAGES.has(message?.type)) {
+      await handleGateMessage(gate, owner, port, message);
+      return;
+    }
     if (message?.type === REPLACE_SNAPSHOT) {
       try {
-        await session.replaceCatalogSnapshot(message.snapshot);
+        await gate.publishMetadata(owner, message.update_token, () =>
+          session.replaceCatalogSnapshot(message.snapshot),
+        );
         port.postMessage({
           type: "IN_MEMORY_CATALOG_REPLACE_SNAPSHOT_RESULT",
           request_id: requestId,
@@ -110,7 +130,9 @@
 
     if (message?.type === REPLACE_TABLE) {
       try {
-        await session.replaceCatalogTable(message.schema_name, message.table);
+        await gate.publishMetadata(owner, message.update_token, () =>
+          session.replaceCatalogTable(message.schema_name, message.table),
+        );
         port.postMessage({
           type: "IN_MEMORY_CATALOG_REPLACE_TABLE_RESULT",
           request_id: requestId,
@@ -130,7 +152,9 @@
 
     if (message?.type === REPLACE_VIEW) {
       try {
-        await session.replaceCatalogView(message.schema_name, message.view);
+        await gate.publishMetadata(owner, message.update_token, () =>
+          session.replaceCatalogView(message.schema_name, message.view),
+        );
         port.postMessage({
           type: "IN_MEMORY_CATALOG_REPLACE_VIEW_RESULT",
           request_id: requestId,
@@ -150,6 +174,7 @@
 
     if (message?.type === DROP_WORKSPACE) {
       try {
+        gate.abandon(owner);
         const result = await session.dropCatalogWorkspace();
         port.postMessage({
           type: "IN_MEMORY_CATALOG_DROP_WORKSPACE_RESULT",
@@ -189,6 +214,41 @@
     });
   }
 
+  async function handleGateMessage(gate, owner, port, message) {
+    const operations = {
+      IN_MEMORY_CATALOG_ACQUIRE_UPDATE: () => gate.acquire(owner, message.update_token),
+      IN_MEMORY_CATALOG_RELEASE_UPDATE: () => gate.release(owner, message.update_token, false),
+      IN_MEMORY_CATALOG_CANCEL_UPDATE: () => gate.cancel(owner, message.update_token),
+      IN_MEMORY_CATALOG_FAIL_UPDATE: () => gate.release(owner, message.update_token, true),
+      IN_MEMORY_CATALOG_LOAD_EXTENSION: () =>
+        gate.loadExtension(owner, message.update_token, owner.connectionId, message.extension),
+    };
+    const operation = operations[message?.type];
+    if (!operation) return false;
+    try {
+      if (typeof message.update_token !== "string" || !message.update_token) {
+        throw Object.assign(new Error("An exclusive update token is required"), {
+          code: "RC_METADATA_INVALID",
+        });
+      }
+      await operation();
+      port.postMessage({
+        type: `${message.type}_RESULT`,
+        request_id: message.request_id,
+        ok: true,
+      });
+    } catch (error) {
+      port.postMessage({
+        type: `${message.type}_RESULT`,
+        request_id: message.request_id,
+        ok: false,
+        code: errorCode(error),
+        message: safeOperationErrorMessage(error),
+      });
+    }
+    return true;
+  }
+
   function errorCode(error) {
     return typeof error?.code === "string" ? error.code : "RC_METADATA_INVALID";
   }
@@ -209,7 +269,6 @@
 
   global.DuckDBInMemoryCatalogWorkerRuntime = Object.freeze({
     createInMemoryCatalogWorkerRuntime,
+    createDuckDBQueryGate,
   });
 })(globalThis);
-
-export {};

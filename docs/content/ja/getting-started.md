@@ -174,7 +174,7 @@ const catalog = await InMemoryCatalogController.initialize(
 初期化完了後、`catalog.connection` を使って標準の SQL でクエリを実行できます。
 
 ```js
-const result = await catalog.query(`
+const result = await catalog.connection.query(`
   SELECT category, total
   FROM app.analytics.category_totals
   ORDER BY category

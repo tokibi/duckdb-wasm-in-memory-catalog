@@ -81,7 +81,7 @@ try {
     snapshot,
   );
 
-  const result = await catalog.query(
+  const result = await catalog.connection.query(
     "SELECT category, total FROM app.analytics.category_totals ORDER BY category",
   );
   const fields = result.schema.fields.map((field) => field.name);

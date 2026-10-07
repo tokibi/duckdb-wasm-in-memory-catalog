@@ -135,7 +135,7 @@ Executes a fully materialized query on the attached connection. Queries, metadat
 
 ### `catalog.withExclusiveUpdate(callback)`
 
-Waits for previously submitted operations to finish, then keeps new managed queries queued until the callback and all submitted scoped metadata operations finish.
+Acquires an exclusive gate in the catalog Worker after running DuckDB requests finish. New ordinary queries, including prepared statement queries on other connections in the same Worker, wait until the callback and all submitted scoped metadata operations finish.
 
 ```js
 await catalog.withExclusiveUpdate(async (update) => {
@@ -149,15 +149,17 @@ await catalog.withExclusiveUpdate(async (update) => {
 
 The callback receives `publishSnapshot`, `replaceTable`, and `replaceView` methods with the same arguments as the controller methods. Perform remote file writes inside the callback, then publish metadata with a new `snapshot` value for every modified table. The callback's return value becomes the result of `withExclusiveUpdate`.
 
-- Use the supplied `update` methods inside the callback. **Do not await `catalog.query`, `diagnostics`, `close`, or another `withExclusiveUpdate` from it**: those operations wait for this callback to finish. Controller-level metadata methods reject while the callback is active.
+- Use the supplied `update` methods inside the callback. **Do not await DuckDB queries, `catalog.query`, `diagnostics`, `close`, or another `withExclusiveUpdate` from it**: those operations wait for this callback to finish. Controller-level metadata methods reject while the callback is active.
 - A callback may complete without publishing metadata, including when no update is needed. Managed queries resume after normal completion. The scope expires when the callback settles; already submitted operations are drained even when not awaited. Await them in application code to make sequencing explicit.
 - A callback or scoped publication failure sets `state` to `failed_closed` and invokes `onRecoveryRequired`. Catching a publication error inside the callback does not reopen the queue. The original failure is returned, and queued/new managed queries reject with `RC_CATALOG_RECOVERY_REQUIRED`.
-- Remote writes are not rolled back. Recover by closing this controller, repairing the files and metadata, and initializing a new controller with the reconciled snapshot. There is no resume method on a failed controller.
-- This coordinates only operations submitted to this controller. Raw connections, streaming/prepared queries, other controllers, other tabs, and external file writers are outside the guarantee. Gateway and HTTP caches must also reflect the updated content; the catalog `snapshot` changes DuckDB's cache identity only.
+- Remote writes are not rolled back. After a callback or publication failure, the Worker blocks further DuckDB work. Close the controllers, repair the files and metadata, and recreate the DuckDB Worker and controllers with the reconciled snapshot. There is no resume method on a failed Worker.
+- An active stream or pending query prevents acquisition: the update rejects before invoking the callback. Finish or cancel it before retrying. Starting a stream while an update is waiting or running also rejects; consume existing streams through their normal fetch/cancel APIs.
+- Only one exclusive update can be pending or running per Worker. A competing controller receives `RC_CATALOG_UPDATE_BUSY` before its callback runs and may retry after the first update finishes. The standard DuckDB-Wasm connection's `useUnsafe` identifier accessor is required; custom adapters without it receive `RC_CATALOG_WORKER_GATE_UNAVAILABLE`.
+- The guarantee covers connections and controllers using the same catalog Worker. Other Workers, tabs, and external file writers are outside it. Gateway and HTTP caches must also reflect the updated content; the catalog `snapshot` changes DuckDB's cache identity only.
 
 ### `catalog.connection`
 
-The raw DuckDB connection for advanced use. Calls through it bypass the controller queue, including `query`, streaming, and prepared statements. Use `catalog.query` for reads that must be protected by `withExclusiveUpdate`.
+The attached DuckDB connection. Its ordinary `query` and prepared statement `query` calls are protected by the Worker's exclusive gate, as are queries on other connections in that Worker. `catalog.query` remains an optional convenience that also joins the controller's operation queue. Streaming follows the restrictions described above.
 
 ---
 
@@ -226,6 +228,9 @@ Errors from the controller are instances of `InMemoryCatalogControllerError`:
 | `RC_CATALOG_WORKSPACE_CLOSED` | Invoked operation on an already closed controller. |
 | `RC_CATALOG_RECOVERY_REQUIRED` | Runtime entered an unrecoverable state requiring restart. |
 | `RC_CATALOG_UPDATE_SCOPE` | Metadata operation used outside its exclusive scope or after the scope expired. |
+| `RC_CATALOG_STREAM_ACTIVE` | An active stream prevents an update, or a stream was started during an update. |
+| `RC_CATALOG_UPDATE_BUSY` | Another controller already has a pending or active update in the Worker. |
+| `RC_CATALOG_WORKER_GATE_UNAVAILABLE` | The connection does not expose the identifier needed for Worker coordination. |
 | `RC_METADATA_GENERATION_EXHAUSTED` | Internal generation counter overflow (recreate workspace). |
 
 ---

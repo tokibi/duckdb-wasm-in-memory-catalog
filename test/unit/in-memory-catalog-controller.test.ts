@@ -2,6 +2,7 @@
 // @ts-nocheck
 import assert from "node:assert/strict";
 import { describe, it } from "vitest";
+import { createDuckDBQueryGate } from "../../src/javascript/in-memory-catalog-query-gate";
 
 await import("../../src/javascript/in-memory-catalog-metadata-store");
 await import("../../src/javascript/in-memory-catalog-worker-runtime");
@@ -56,6 +57,9 @@ function fakeDatabase() {
   const queries = [];
   const connection = {
     closed: false,
+    useUnsafe(callback) {
+      return callback(undefined, 1);
+    },
     async query(sql) {
       queries.push(sql);
     },
@@ -94,7 +98,192 @@ function deferred() {
   return { promise, resolve };
 }
 
+function gatedDatabase() {
+  const store = new InMemoryCatalogMetadataStore();
+  const waiters = new Map();
+  const held = new Map();
+  const queries = [];
+  let messageId = 0;
+  let connectionId = 0;
+  const post = (response) => {
+    const waiter = waiters.get(response.requestId);
+    if (!waiter) throw new Error("Unexpected public reply");
+    waiters.delete(response.requestId);
+    if (response.type === "ERROR")
+      waiter.reject(Object.assign(new Error(response.data.message), { code: response.data.code }));
+    else waiter.resolve(response.data);
+  };
+  const reply = (request, type = "QUERY_RESULT", data = []) => {
+    const response = { requestId: request.messageId, type, data };
+    if (gate.observeResponse(response)) post(response);
+  };
+  const gate = createDuckDBQueryGate(({ data: request }) => {
+    queries.push(request);
+    if (request.type === "RUN_QUERY" && request.data[1] === "slow")
+      held.set(request.data[0], request);
+    else
+      queueMicrotask(() => reply(request, request.type === "DISCONNECT" ? "OK" : "QUERY_RESULT"));
+    // Deliberately return void: completion must follow the protocol reply.
+  }, post);
+  const send = (type, data) =>
+    new Promise((resolve, reject) => {
+      const id = ++messageId;
+      waiters.set(id, { resolve, reject });
+      gate.handleMessage({ data: { messageId: id, type, data } });
+    });
+  const db = {
+    async connect() {
+      const id = ++connectionId;
+      return {
+        useUnsafe: (callback) => callback(db, id),
+        query: (sql) => send("RUN_QUERY", [id, sql]),
+        close: () => send("DISCONNECT", id),
+      };
+    },
+  };
+  return {
+    db,
+    gate,
+    queries,
+    held,
+    reply,
+    send,
+    worker: runtimeWorker(createInMemoryCatalogWorkerRuntime(store, gate)),
+  };
+}
+
 describe("InMemoryCatalogController", () => {
+  it("protects ordinary connections across the shared Worker and loads scoped scanner extensions", async () => {
+    const f = gatedDatabase();
+    const catalog = await InMemoryCatalogController.initialize(
+      f.db,
+      f.worker,
+      { workspaceId: "workspace", catalogName: "dataset" },
+      snapshot(),
+    );
+    const second = await f.db.connect();
+    const firstRead = catalog.connection.query("slow");
+    const entered = deferred();
+    const finish = deferred();
+    const update = catalog.withExclusiveUpdate(async (scope) => {
+      entered.resolve();
+      await finish.promise;
+      const table = snapshot("https://example.test/new.json").schemas[0].tables[0];
+      table.snapshot = "new";
+      table.scanner = { type: "json", options: {} };
+      await scope.replaceTable("main", table);
+    });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    assert.equal(
+      f.queries.some((r) => r.data?.[1] === "LOAD json"),
+      false,
+    );
+    f.reply(f.held.get(1));
+    await firstRead;
+    await entered.promise;
+    const nextRead = second.query("after update");
+    assert.equal(
+      f.queries.some((r) => r.data?.[1] === "after update"),
+      false,
+    );
+    finish.resolve();
+    await update;
+    await nextRead;
+    const sql = f.queries.filter((r) => r.type === "RUN_QUERY").map((r) => r.data[1]);
+    assert.ok(sql.indexOf("LOAD json") < sql.indexOf("after update"));
+    await second.close();
+    await catalog.close();
+  });
+
+  it("rejects acquisition before invoking the host callback while a stream is active", async () => {
+    const f = gatedDatabase();
+    const catalog = await InMemoryCatalogController.initialize(
+      f.db,
+      f.worker,
+      { workspaceId: "workspace", catalogName: "dataset" },
+      snapshot(),
+    );
+    // Reserve a streaming request in the actual gate without using catalog.query.
+    await f.send("SEND_PREPARED", [2, 1, []]);
+    let called = false;
+    await assert.rejects(
+      catalog.withExclusiveUpdate(() => {
+        called = true;
+      }),
+      { code: "RC_CATALOG_STREAM_ACTIVE" },
+    );
+    assert.equal(called, false);
+    assert.equal(catalog.state, "active");
+    await catalog.close();
+  });
+
+  it("cancels timed-out acquisition and permits retry after the active read finishes", async () => {
+    const f = gatedDatabase();
+    const catalog = await InMemoryCatalogController.initialize(
+      f.db,
+      f.worker,
+      { workspaceId: "workspace", catalogName: "dataset", ackTimeoutMs: 20 },
+      snapshot(),
+    );
+    const read = catalog.connection.query("slow");
+    let called = false;
+    await assert.rejects(
+      catalog.withExclusiveUpdate(() => {
+        called = true;
+      }),
+      { code: "RC_REMOTE_IO" },
+    );
+    assert.equal(called, false);
+    assert.equal(catalog.state, "active");
+    f.reply(f.held.get(1));
+    await read;
+    await catalog.withExclusiveUpdate(() => "no-op");
+    await catalog.connection.query("after cancellation");
+    await catalog.close();
+  });
+
+  it("fails closed for ordinary queries on every connection after a host exception", async () => {
+    const f = gatedDatabase();
+    const catalog = await InMemoryCatalogController.initialize(
+      f.db,
+      f.worker,
+      { workspaceId: "workspace", catalogName: "dataset" },
+      snapshot(),
+    );
+    const second = await f.db.connect();
+    await assert.rejects(
+      catalog.withExclusiveUpdate(() => {
+        throw new Error("upload failed");
+      }),
+      /upload failed/,
+    );
+    await assert.rejects(catalog.connection.query("blocked"), /RC_CATALOG_RECOVERY_REQUIRED/);
+    await assert.rejects(second.query("also blocked"), /RC_CATALOG_RECOVERY_REQUIRED/);
+    await second.close();
+    await catalog.close();
+  });
+
+  it("rejects exclusive updates on custom connections without an identifier accessor", async () => {
+    const { db, connection } = fakeDatabase();
+    delete connection.useUnsafe;
+    const catalog = await InMemoryCatalogController.initialize(
+      db,
+      runtimeWorker(createInMemoryCatalogWorkerRuntime(new InMemoryCatalogMetadataStore())),
+      { workspaceId: "workspace", catalogName: "dataset" },
+      snapshot(),
+    );
+    let called = false;
+    await assert.rejects(
+      catalog.withExclusiveUpdate(() => {
+        called = true;
+      }),
+      { code: "RC_CATALOG_WORKER_GATE_UNAVAILABLE" },
+    );
+    assert.equal(called, false);
+    assert.equal(catalog.state, "active");
+    await catalog.close();
+  });
+
   it("orders fully materialized reads, remote writes, scoped publication, and queued reads", async () => {
     const store = new InMemoryCatalogMetadataStore();
     const worker = runtimeWorker(createInMemoryCatalogWorkerRuntime(store));

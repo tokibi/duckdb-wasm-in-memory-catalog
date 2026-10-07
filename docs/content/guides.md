@@ -81,7 +81,7 @@ await catalog.publishSnapshot(nextSnapshot)
 
 ## Overwriting a File While Queries May Be Running
 
-Submit reads through `catalog.query`. Enclose both the remote write and metadata update in one exclusive callback:
+Read through the normal DuckDB connection, such as `catalog.connection.query(sql)`. Enclose both the remote write and metadata update in one exclusive callback:
 
 ```js
 await catalog.withExclusiveUpdate(async (update) => {
@@ -93,7 +93,7 @@ await catalog.withExclusiveUpdate(async (update) => {
 })
 ```
 
-Existing managed queries finish before the write starts; subsequent queries wait until the callback and any submitted publications finish. Use only the supplied `update` methods for catalog operations inside the callback. If no update is needed, the callback may return without publishing metadata. When changing a file, update the affected table's `snapshot` as shown above. Any callback or publication failure blocks managed queries until you close the controller, repair the files and metadata, and initialize a new controller. This does not coordinate raw connection calls, other tabs/controllers, or external writers. See the [API reference](./reference.md#catalogwithexclusiveupdatecallback) for scope and recovery details.
+Existing ordinary queries finish before the write starts; subsequent queries on any connection in the same Worker wait until the callback and submitted publications finish. Use only the supplied `update` methods for catalog operations inside the callback, and do not await DuckDB queries there. If no update is needed, the callback may return without publishing metadata. When changing a file, update the affected table's `snapshot` as shown above. An active stream prevents the update from starting; finish or cancel it before retrying. New stream starts during an update reject. A callback or publication failure blocks DuckDB work until you repair the files and metadata and recreate the Worker and controllers. Other Workers, tabs, and external writers remain outside this coordination. See the [API reference](./reference.md#catalogwithexclusiveupdatecallback) for scope and recovery details.
 
 ## Recipe 3: Hot-Swap a Single Table (`replaceTable`)
 
@@ -169,9 +169,9 @@ GROUP BY email;
 Use `USE` to set the default catalog and schema for simpler queries:
 
 ```js
-await catalog.query('USE app.main')
+await catalog.connection.query('USE app.main')
 
-const res = await catalog.query(`
+const res = await catalog.connection.query(`
   SELECT * FROM active_users LIMIT 10
 `)
 ```
