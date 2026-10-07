@@ -72,7 +72,7 @@ export function createDuckDBQueryGate(
   }
 
   function grantIfIdle() {
-    if (lock && !lock.held && active.size === 0 && metadataActive === 0) {
+    if (lock && !lock.held && active.size + metadataActive + streams.size === 0) {
       lock.held = true;
       lock.resolve();
     }
@@ -189,13 +189,6 @@ export function createDuckDBQueryGate(
     if (lock)
       return Promise.reject(
         gateError("RC_CATALOG_UPDATE_BUSY", "Another exclusive update is pending or active"),
-      );
-    if (streams.size)
-      return Promise.reject(
-        gateError(
-          "RC_CATALOG_STREAM_ACTIVE",
-          "Drain or cancel active streaming queries before updating",
-        ),
       );
     return new Promise((resolve, reject) => {
       lock = { owner, token, held: false, resolve, reject };

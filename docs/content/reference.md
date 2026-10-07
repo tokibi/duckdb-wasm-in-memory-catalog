@@ -151,9 +151,9 @@ The callback defines the protected interval: file writes and metadata publicatio
 - A callback may complete without publishing metadata, including when no update is needed. Queries resume after normal completion. The scope expires when the callback settles; already submitted operations are drained even when not awaited. Metadata arguments are captured when a handle method is called, not when the callback is scheduled. Await them in application code to make sequencing explicit.
 - A callback or scoped publication failure sets `state` to `failed_closed` and invokes `onRecoveryRequired`. Catching a publication error inside the callback does not reopen the gate. The original failure is returned, and queued/new DuckDB queries reject with `RC_CATALOG_RECOVERY_REQUIRED`.
 - Remote writes are not rolled back. After a callback or publication failure, the Worker blocks further DuckDB work. Close the controllers, repair the files and metadata, and recreate the DuckDB Worker and controllers with the reconciled snapshot. There is no resume method on a failed Worker.
-- An active stream or pending query prevents acquisition: the update rejects before invoking the callback. Finish or cancel it before retrying. Starting a stream while an update is waiting or running also rejects; consume existing streams through their normal fetch/cancel APIs.
+- An active stream or pending query delays acquisition until it finishes or is cancelled. Existing streams may continue to poll, fetch, or cancel while the update waits. New stream starts while an update is waiting or running reject. `ackTimeoutMs` (default 5000 ms) bounds acquisition waiting: on timeout, the pending acquisition is cancelled and `RC_REMOTE_IO` is returned before the callback runs. The stream is not automatically cancelled; the controller remains usable after confirmed acquisition cancellation.
 - Only one exclusive update can be pending or running per Worker. A competing controller receives `RC_CATALOG_UPDATE_BUSY` before its callback runs and may retry after the first update finishes. The standard DuckDB-Wasm connection's `useUnsafe` identifier accessor is required; custom adapters without it receive `RC_CATALOG_WORKER_GATE_UNAVAILABLE`.
-- The guarantee covers connections and controllers using the same catalog Worker. Other Workers, tabs, and external file writers are outside it. Gateway and HTTP caches must also reflect the updated content; the catalog `snapshot` changes DuckDB's cache identity only.
+- The gate covers the whole DuckDB Worker, including every catalog, table, and connection in it; it is not a per-table lock. The callback determines the affected tables after acquisition. Other Workers, tabs, and external file writers are outside it. Gateway and HTTP caches must also reflect the updated content; the catalog `snapshot` changes DuckDB's cache identity only.
 
 ### `catalog.connection`
 
@@ -226,7 +226,7 @@ Errors from the controller are instances of `InMemoryCatalogControllerError`:
 | `RC_CATALOG_WORKSPACE_CLOSED` | Invoked operation on an already closed controller. |
 | `RC_CATALOG_RECOVERY_REQUIRED` | Runtime entered an unrecoverable state requiring restart. |
 | `RC_CATALOG_UPDATE_SCOPE` | Metadata operation used outside its exclusive scope or after the scope expired. |
-| `RC_CATALOG_STREAM_ACTIVE` | An active stream prevents an update, or a stream was started during an update. |
+| `RC_CATALOG_STREAM_ACTIVE` | A new stream was started during an update, or a stream is already active on that connection. |
 | `RC_CATALOG_UPDATE_BUSY` | Another controller already has a pending or active update in the Worker. |
 | `RC_CATALOG_WORKER_GATE_UNAVAILABLE` | The connection does not expose the identifier needed for Worker coordination. |
 | `RC_METADATA_GENERATION_EXHAUSTED` | Internal generation counter overflow (recreate workspace). |

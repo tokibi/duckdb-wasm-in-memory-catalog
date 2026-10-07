@@ -90,20 +90,27 @@ describe("Worker-wide DuckDB query gate", () => {
     const owner = {};
     f.request(1, "START_PENDING_QUERY", [10, "SELECT 1", true]);
     f.reply(1, "QUERY_RESULT_HEADER_OR_NULL", null);
-    await assert.rejects(f.gate.acquire(owner, "token"), { code: "RC_CATALOG_STREAM_ACTIVE" });
+    let acquired = false;
+    const acquire = f.gate.acquire(owner, "token").then(() => {
+      acquired = true;
+    });
+    await Promise.resolve();
+    assert.equal(acquired, false);
     f.request(2, "START_PENDING_QUERY", [10, "SELECT 2", true]);
     assert.equal(f.rejected[0].requestId, 2);
     f.request(3, "POLL_PENDING_QUERY", 10);
     f.reply(3, "QUERY_RESULT_HEADER_OR_NULL", new Uint8Array([1]));
     f.request(4, "FETCH_QUERY_RESULTS", 10);
     f.reply(4, "QUERY_RESULT_CHUNK", null);
-    await assert.rejects(f.gate.acquire(owner, "token"), { code: "RC_CATALOG_STREAM_ACTIVE" });
+    await Promise.resolve();
+    assert.equal(acquired, false);
     f.request(5, "FETCH_QUERY_RESULTS", 10);
     f.reply(5, "QUERY_RESULT_CHUNK", new Uint8Array([1]));
-    await assert.rejects(f.gate.acquire(owner, "token"), { code: "RC_CATALOG_STREAM_ACTIVE" });
+    await Promise.resolve();
+    assert.equal(acquired, false);
     f.request(6, "FETCH_QUERY_RESULTS", 10);
     f.reply(6, "QUERY_RESULT_CHUNK", new Uint8Array());
-    await f.gate.acquire(owner, "token");
+    await acquire;
     f.gate.release(owner, "token", false);
   });
 
@@ -120,6 +127,39 @@ describe("Worker-wide DuckDB query gate", () => {
     }
   });
 
+  it("waits for all existing streams, permits their cancellation, and blocks new starts", async () => {
+    const f = fixture();
+    f.request(1, "SEND_PREPARED", [10, 1, []]);
+    f.reply(1, "QUERY_RESULT_HEADER");
+    f.request(2, "SEND_PREPARED", [20, 1, []]);
+    f.reply(2, "QUERY_RESULT_HEADER");
+    const owner = {};
+    let acquired = false;
+    const acquire = f.gate.acquire(owner, "token").then(() => {
+      acquired = true;
+    });
+    f.request(3, "RUN_QUERY", [30, "queued"]);
+    f.request(4, "START_PENDING_QUERY", [40, "new stream", true]);
+    assert.equal(f.rejected.at(-1).requestId, 4);
+    f.request(5, "CANCEL_PENDING_QUERY", 10);
+    f.reply(5, "SUCCESS", false);
+    await Promise.resolve();
+    assert.equal(acquired, false);
+    f.request(6, "CANCEL_PENDING_QUERY", 10);
+    f.reply(6, "SUCCESS", true);
+    await Promise.resolve();
+    assert.equal(acquired, false);
+    f.request(7, "DISCONNECT", 20);
+    f.reply(7, "OK");
+    await acquire;
+    assert.equal(
+      f.dispatched.some((e) => e.data.messageId === 3),
+      false,
+    );
+    f.gate.release(owner, "token", false);
+    assert.equal(f.dispatched.at(-1).data.messageId, 3);
+  });
+
   it("keeps a failed fetch reserved until the stream is explicitly cancelled", async () => {
     const f = fixture();
     f.request(1, "SEND_PREPARED", [10, 2, []]);
@@ -127,10 +167,15 @@ describe("Worker-wide DuckDB query gate", () => {
     f.request(2, "FETCH_QUERY_RESULTS", 10);
     f.reply(2, "ERROR", { message: "Read failed" });
     const owner = {};
-    await assert.rejects(f.gate.acquire(owner, "token"), { code: "RC_CATALOG_STREAM_ACTIVE" });
+    let acquired = false;
+    const acquire = f.gate.acquire(owner, "token").then(() => {
+      acquired = true;
+    });
+    await Promise.resolve();
+    assert.equal(acquired, false);
     f.request(3, "CANCEL_PENDING_QUERY", 10);
     f.reply(3, "SUCCESS", true);
-    await f.gate.acquire(owner, "token");
+    await acquire;
     f.gate.release(owner, "token", false);
   });
 

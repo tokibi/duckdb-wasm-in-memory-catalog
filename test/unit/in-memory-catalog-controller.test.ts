@@ -219,7 +219,7 @@ describe("InMemoryCatalogController", () => {
     await catalog.close();
   });
 
-  it("rejects acquisition before invoking the host callback while a stream is active", async () => {
+  it("waits for an existing stream to disconnect before invoking the host callback", async () => {
     const f = gatedDatabase();
     const catalog = await InMemoryCatalogController.initialize(
       f.db,
@@ -230,14 +230,43 @@ describe("InMemoryCatalogController", () => {
     // Reserve a streaming request in the actual gate through the normal DuckDB protocol.
     await f.send("SEND_PREPARED", [2, 1, []]);
     let called = false;
+    const update = catalog.update(() => {
+      called = true;
+    });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    assert.equal(called, false);
+    await f.send("DISCONNECT", 2);
+    await update;
+    assert.equal(called, true);
+    assert.equal(catalog.state, "active");
+    await catalog.close();
+  });
+
+  it("times out waiting for an abandoned stream without invoking the callback or cancelling the stream", async () => {
+    const f = gatedDatabase();
+    const catalog = await InMemoryCatalogController.initialize(
+      f.db,
+      f.worker,
+      { workspaceId: "workspace", catalogName: "dataset", ackTimeoutMs: 20 },
+      snapshot(),
+    );
+    await f.send("SEND_PREPARED", [2, 1, []]);
+    let called = false;
     await assert.rejects(
       catalog.update(() => {
         called = true;
       }),
-      { code: "RC_CATALOG_STREAM_ACTIVE" },
+      { code: "RC_REMOTE_IO" },
     );
     assert.equal(called, false);
     assert.equal(catalog.state, "active");
+    assert.equal(
+      f.queries.some((r) => r.type === "CANCEL_PENDING_QUERY"),
+      false,
+    );
+    await catalog.connection.query("after timeout");
+    await f.send("DISCONNECT", 2);
+    await catalog.update(() => "retry");
     await catalog.close();
   });
 
