@@ -30,6 +30,10 @@ describe("Worker-wide DuckDB query gate", () => {
     const acquire = f.gate.acquire(owner, "token").then(() => {
       acquired = true;
     });
+    await assert.rejects(
+      f.gate.publishMetadata(owner, "token", async () => {}),
+      { code: "RC_CATALOG_UPDATE_SCOPE" },
+    );
     f.request(3, "RUN_QUERY", [30, "SELECT 2"]);
     f.request(4, "CREATE_PREPARED", [40, "SELECT 3"]);
     f.request(5, "START_PENDING_QUERY", [50, "SELECT 4", true]);
@@ -53,32 +57,31 @@ describe("Worker-wide DuckDB query gate", () => {
     );
   });
 
-  it("drains metadata publication and rejects unrelated metadata while locked", async () => {
+  it("requires an acquired owner token for every metadata publication", async () => {
     const f = fixture();
     const owner = {};
-    let finish!: () => void;
-    const pending = f.gate.publishMetadata(
-      {},
-      undefined,
-      () =>
-        new Promise<void>((resolve) => {
-          finish = resolve;
-        }),
+    await assert.rejects(
+      f.gate.publishMetadata(owner, undefined, async () => {}),
+      { code: "RC_CATALOG_UPDATE_SCOPE" },
     );
-    let acquired = false;
-    const acquire = f.gate.acquire(owner, "token").then(() => {
-      acquired = true;
-    });
-    await Promise.resolve();
-    assert.equal(acquired, false);
-    finish();
-    await pending;
-    await acquire;
+    await f.gate.acquire(owner, "token");
     await assert.rejects(
       f.gate.publishMetadata({}, undefined, async () => {}),
       { code: "RC_CATALOG_UPDATE_SCOPE" },
     );
     await f.gate.publishMetadata(owner, "token", async () => {});
+    let finish!: () => void;
+    const pending = f.gate.publishMetadata(
+      owner,
+      "token",
+      () =>
+        new Promise<void>((resolve) => {
+          finish = resolve;
+        }),
+    );
+    assert.throws(() => f.gate.release(owner, "token", false), { code: "RC_CATALOG_UPDATE_BUSY" });
+    finish();
+    await pending;
     f.gate.release(owner, "token", false);
   });
 

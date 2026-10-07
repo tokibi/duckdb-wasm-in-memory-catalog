@@ -197,7 +197,9 @@ test(
               "SELECT total AS result FROM test_catalog.analytics.event_totals WHERE category = 'alpha'",
             ),
           };
-          await catalog.replaceTable("analytics", csvTable("updated-events.csv"));
+          await catalog.update((update) =>
+            update.replaceTable("analytics", csvTable("updated-events.csv")),
+          );
           const after = {
             csv: await queryNumber(
               "SELECT sum(value) AS result FROM test_catalog.analytics.events_csv",

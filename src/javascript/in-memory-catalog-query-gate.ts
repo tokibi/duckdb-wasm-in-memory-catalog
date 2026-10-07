@@ -220,6 +220,12 @@ export function createDuckDBQueryGate(
 
   function release(owner: object, token: string, fail: boolean) {
     const held = requireOwner(owner, token);
+    if (!fail && metadataActive + internal.size > 0) {
+      throw gateError(
+        "RC_CATALOG_UPDATE_BUSY",
+        "Wait for scoped operations before releasing the Worker gate",
+      );
+    }
     lock = undefined;
     if (fail) failed = true;
     if (!held.held)
@@ -235,7 +241,12 @@ export function createDuckDBQueryGate(
 
   function assertMetadata(owner: object, token?: string) {
     if (failed) throw recoveryError();
-    if (lock) requireOwner(owner, token ?? "");
+    const held = requireOwner(owner, token ?? "");
+    if (!held.held)
+      throw gateError(
+        "RC_CATALOG_UPDATE_SCOPE",
+        "Metadata updates require the acquired Worker gate",
+      );
   }
 
   async function publishMetadata<T>(

@@ -10,7 +10,28 @@ const { createInMemoryCatalogWorker, InMemoryCatalogController, InMemoryCatalogC
   await import("../../src/javascript/in-memory-catalog-controller");
 
 const { InMemoryCatalogMetadataStore } = globalThis.DuckDBInMemoryCatalogMetadata;
-const { createInMemoryCatalogWorkerRuntime } = globalThis.DuckDBInMemoryCatalogWorkerRuntime;
+const { createInMemoryCatalogWorkerRuntime: createRuntime } =
+  globalThis.DuckDBInMemoryCatalogWorkerRuntime;
+const fakeConnections = new Map();
+let nextFakeConnection = 100;
+
+function createInMemoryCatalogWorkerRuntime(store, gate) {
+  if (!gate) {
+    gate = createDuckDBQueryGate(({ data: request }) => {
+      const connection = fakeConnections.get(request.data[0]);
+      void connection.query(request.data[1]).then(
+        () => gate.observeResponse({ requestId: request.messageId, type: "QUERY_RESULT" }),
+        (error) =>
+          gate.observeResponse({
+            requestId: request.messageId,
+            type: "ERROR",
+            data: { message: error.message },
+          }),
+      );
+    });
+  }
+  return createRuntime(store, gate);
+}
 
 function snapshot(uri = "https://example.test/table") {
   return {
@@ -54,11 +75,12 @@ function viewSnapshot() {
 }
 
 function fakeDatabase() {
+  const id = ++nextFakeConnection;
   const queries = [];
   const connection = {
     closed: false,
     useUnsafe(callback) {
-      return callback(undefined, 1);
+      return callback(undefined, id);
     },
     async query(sql) {
       queries.push(sql);
@@ -67,6 +89,7 @@ function fakeDatabase() {
       this.closed = true;
     },
   };
+  fakeConnections.set(id, connection);
   return {
     db: {
       async connect() {
@@ -166,7 +189,7 @@ describe("InMemoryCatalogController", () => {
     const firstRead = catalog.connection.query("slow");
     const entered = deferred();
     const finish = deferred();
-    const update = catalog.withExclusiveUpdate(async (scope) => {
+    const update = catalog.update(async (scope) => {
       entered.resolve();
       await finish.promise;
       const table = snapshot("https://example.test/new.json").schemas[0].tables[0];
@@ -208,7 +231,7 @@ describe("InMemoryCatalogController", () => {
     await f.send("SEND_PREPARED", [2, 1, []]);
     let called = false;
     await assert.rejects(
-      catalog.withExclusiveUpdate(() => {
+      catalog.update(() => {
         called = true;
       }),
       { code: "RC_CATALOG_STREAM_ACTIVE" },
@@ -229,7 +252,7 @@ describe("InMemoryCatalogController", () => {
     const read = catalog.connection.query("slow");
     let called = false;
     await assert.rejects(
-      catalog.withExclusiveUpdate(() => {
+      catalog.update(() => {
         called = true;
       }),
       { code: "RC_REMOTE_IO" },
@@ -238,7 +261,7 @@ describe("InMemoryCatalogController", () => {
     assert.equal(catalog.state, "active");
     f.reply(f.held.get(1));
     await read;
-    await catalog.withExclusiveUpdate(() => "no-op");
+    await catalog.update(() => "no-op");
     await catalog.connection.query("after cancellation");
     await catalog.close();
   });
@@ -253,7 +276,7 @@ describe("InMemoryCatalogController", () => {
     );
     const second = await f.db.connect();
     await assert.rejects(
-      catalog.withExclusiveUpdate(() => {
+      catalog.update(() => {
         throw new Error("upload failed");
       }),
       /upload failed/,
@@ -264,25 +287,19 @@ describe("InMemoryCatalogController", () => {
     await catalog.close();
   });
 
-  it("rejects exclusive updates on custom connections without an identifier accessor", async () => {
+  it("rejects initialization on custom connections without an identifier accessor", async () => {
     const { db, connection } = fakeDatabase();
     delete connection.useUnsafe;
-    const catalog = await InMemoryCatalogController.initialize(
-      db,
-      runtimeWorker(createInMemoryCatalogWorkerRuntime(new InMemoryCatalogMetadataStore())),
-      { workspaceId: "workspace", catalogName: "dataset" },
-      snapshot(),
-    );
-    let called = false;
     await assert.rejects(
-      catalog.withExclusiveUpdate(() => {
-        called = true;
-      }),
+      InMemoryCatalogController.initialize(
+        db,
+        runtimeWorker(createInMemoryCatalogWorkerRuntime(new InMemoryCatalogMetadataStore())),
+        { workspaceId: "workspace", catalogName: "dataset" },
+        snapshot(),
+      ),
       { code: "RC_CATALOG_WORKER_GATE_UNAVAILABLE" },
     );
-    assert.equal(called, false);
-    assert.equal(catalog.state, "active");
-    await catalog.close();
+    assert.equal(connection.closed, true);
   });
 
   it("drains unawaited scoped publication before queued reads and expires the scope", async () => {
@@ -296,7 +313,7 @@ describe("InMemoryCatalogController", () => {
     const started = deferred();
     const finish = deferred();
     let scope;
-    const exclusive = controller.withExclusiveUpdate(async (update) => {
+    const exclusive = controller.update(async (update) => {
       scope = update;
       started.resolve();
       await finish.promise;
@@ -312,12 +329,9 @@ describe("InMemoryCatalogController", () => {
       f.queries.some((r) => r.data?.[1] === "after publication"),
       false,
     );
-    await assert.rejects(controller.publishSnapshot(snapshot()), {
-      code: "RC_CATALOG_UPDATE_SCOPE",
-    });
-    await assert.rejects(controller.replaceTable("main", snapshot().schemas[0].tables[0]), {
-      code: "RC_CATALOG_UPDATE_SCOPE",
-    });
+    assert.equal("publishSnapshot" in controller, false);
+    assert.equal("replaceTable" in controller, false);
+    assert.equal("replaceView" in controller, false);
     const close = controller.close();
     finish.resolve();
     assert.equal(await exclusive, "updated");
@@ -352,14 +366,14 @@ describe("InMemoryCatalogController", () => {
     const started = deferred();
     const fail = deferred();
     const originalError = new Error("remote upload failed");
-    const update = controller.withExclusiveUpdate(async () => {
+    const update = controller.update(async () => {
       started.resolve();
       await fail.promise;
       throw originalError;
     });
     const updateRejected = assert.rejects(update, (error) => error === originalError);
     const metadataRejected = assert.rejects(
-      controller.publishSnapshot(snapshot()),
+      controller.update((update) => update.publishSnapshot(snapshot())),
       (error) => error.code === "RC_CATALOG_RECOVERY_REQUIRED",
     );
     await started.promise;
@@ -393,7 +407,7 @@ describe("InMemoryCatalogController", () => {
     );
     try {
       await assert.rejects(
-        controller.withExclusiveUpdate(async (update) => {
+        controller.update(async (update) => {
           await assert.rejects(
             update.publishSnapshot({}),
             (error) => error.code === "RC_METADATA_VERSION",
@@ -424,7 +438,7 @@ describe("InMemoryCatalogController", () => {
       let scope;
       const finish = deferred();
       const started = deferred();
-      const exclusive = controller.withExclusiveUpdate(async (update) => {
+      const exclusive = controller.update(async (update) => {
         scope = update;
         started.resolve();
         await finish.promise;
@@ -521,7 +535,9 @@ describe("InMemoryCatalogController", () => {
       snapshot(),
     );
 
-    await controller.publishSnapshot(snapshot("https://example.test/revision-2"));
+    await controller.update((update) =>
+      update.publishSnapshot(snapshot("https://example.test/revision-2")),
+    );
     assert.equal((await controller.diagnostics()).active_workspace_session_count, 1);
     const firstClose = controller.close();
     const secondClose = controller.close();
@@ -607,11 +623,11 @@ describe("InMemoryCatalogController", () => {
       jsonSnapshot.schemas[0].tables[0].columns = [
         { name: "payload", type: "STRUCT(id BIGINT, tags VARCHAR[])", nullable: true },
       ];
-      await controller.publishSnapshot(jsonSnapshot);
+      await controller.update((update) => update.publishSnapshot(jsonSnapshot));
 
       const replacement = structuredClone(jsonSnapshot.schemas[0].tables[0]);
       replacement.columns = [{ name: "payload", type: "JSON", nullable: true }];
-      await controller.replaceTable("main", replacement);
+      await controller.update((update) => update.replaceTable("main", replacement));
 
       assert.equal(queries.filter((query) => query === "LOAD json").length, 1);
       assert.ok(
@@ -659,7 +675,7 @@ describe("InMemoryCatalogController", () => {
     try {
       const replacement = structuredClone(initial.schemas[0].tables[0]);
       replacement.scanner.options = { header: true, sheet: "Data" };
-      await controller.replaceTable("main", replacement);
+      await controller.update((update) => update.replaceTable("main", replacement));
 
       assert.equal(queries.filter((query) => query === "LOAD excel").length, 1);
       assert.ok(
@@ -690,7 +706,7 @@ describe("InMemoryCatalogController", () => {
     );
   });
 
-  it("captures each submitted state before queuing and recovers from failed publication", async () => {
+  it("captures scoped publications before queuing and fails closed after invalid publication", async () => {
     const store = new InMemoryCatalogMetadataStore();
     const actualSession = store.openWorkspaceSession.bind(store);
     const publishedNames = [];
@@ -714,20 +730,25 @@ describe("InMemoryCatalogController", () => {
     );
     try {
       const candidate = snapshot();
-      candidate.schemas[0].tables[0].name = "first";
-      const first = controller.publishSnapshot(candidate);
-      candidate.schemas[0].tables[0].name = "second";
-      const second = controller.publishSnapshot(candidate);
-      candidate.schemas[0].tables[0].name = "not-submitted";
-      await Promise.all([first, second]);
+      await controller.update(async (update) => {
+        candidate.schemas[0].tables[0].name = "first";
+        const first = update.publishSnapshot(candidate);
+        candidate.schemas[0].tables[0].name = "second";
+        const second = update.publishSnapshot(candidate);
+        candidate.schemas[0].tables[0].name = "not-submitted";
+        await Promise.all([first, second]);
+      });
       assert.deepEqual(publishedNames, ["table1", "first", "second"]);
       assert.equal(store.currentRevision("workspace"), 3n);
       await assert.rejects(
-        controller.publishSnapshot({}),
+        controller.update((update) => update.publishSnapshot({})),
         (error) => error.code === "RC_METADATA_VERSION",
       );
-      await controller.publishSnapshot(snapshot());
-      assert.equal(store.currentRevision("workspace"), 4n);
+      await assert.rejects(
+        controller.update((update) => update.publishSnapshot(snapshot())),
+        { code: "RC_CATALOG_RECOVERY_REQUIRED" },
+      );
+      assert.equal(store.currentRevision("workspace"), 3n);
       assert.equal("currentRevision" in controller, false);
     } finally {
       await controller.close();
@@ -750,10 +771,13 @@ describe("InMemoryCatalogController", () => {
       candidate.snapshot = "snapshot-update";
       const firstFull = snapshot("https://example.test/full-update");
       firstFull.schemas[0].tables[0].snapshot = "snapshot-full-update";
-      const fullPublication = controller.publishSnapshot(firstFull);
-      const replacement = controller.replaceTable("MAIN", candidate);
-      candidate.snapshot = "mutated-after-submit";
-      candidate.files[0] = "https://example.test/mutated-after-submit";
+      const fullPublication = controller.update((update) => update.publishSnapshot(firstFull));
+      const replacement = controller.update((update) => {
+        const operation = update.replaceTable("MAIN", candidate);
+        candidate.snapshot = "mutated-after-submit";
+        candidate.files[0] = "https://example.test/mutated-after-submit";
+        return operation;
+      });
       await Promise.all([fullPublication, replacement]);
 
       assert.equal(store.currentRevision("workspace"), 3n);
@@ -764,10 +788,12 @@ describe("InMemoryCatalogController", () => {
       const replacementBeforeFull = snapshot("https://example.test/table-before-full").schemas[0]
         .tables[0];
       replacementBeforeFull.snapshot = "snapshot-before-full";
-      const secondReplacement = controller.replaceTable("main", replacementBeforeFull);
+      const secondReplacement = controller.update((update) =>
+        update.replaceTable("main", replacementBeforeFull),
+      );
       const finalFull = snapshot("https://example.test/final-full");
       finalFull.schemas[0].tables[0].snapshot = "snapshot-final-full";
-      const finalPublication = controller.publishSnapshot(finalFull);
+      const finalPublication = controller.update((update) => update.publishSnapshot(finalFull));
       await Promise.all([secondReplacement, finalPublication]);
 
       assert.equal(store.currentRevision("workspace"), 5n);
@@ -792,8 +818,11 @@ describe("InMemoryCatalogController", () => {
 
     try {
       const candidate = { name: "VIEW1", query: "SELECT id FROM table1 WHERE id > 10" };
-      const replacement = controller.replaceView("MAIN", candidate);
-      candidate.query = "SELECT id FROM table1 WHERE id > 20";
+      const replacement = controller.update((update) => {
+        const operation = update.replaceView("MAIN", candidate);
+        candidate.query = "SELECT id FROM table1 WHERE id > 20";
+        return operation;
+      });
       await replacement;
 
       assert.equal(
@@ -851,7 +880,7 @@ describe("InMemoryCatalogController", () => {
     assert.equal(connection.closed, true);
     assert.deepEqual(recovery, [{ component: "in_memory_catalog", workspaceId: "workspace" }]);
     await assert.rejects(
-      () => controller.publishSnapshot(snapshot()),
+      () => controller.update((update) => update.publishSnapshot(snapshot())),
       (error) => error.code === "RC_CATALOG_WORKSPACE_CLOSED",
     );
   });
@@ -862,9 +891,9 @@ function workerWithoutDropAck() {
   worker.postMessage = (data, ports) => {
     const port = ports[0];
     port.onmessage = (event) => {
-      if (event.data.type === "IN_MEMORY_CATALOG_REPLACE_SNAPSHOT") {
+      if (event.data.type !== "IN_MEMORY_CATALOG_DROP_WORKSPACE") {
         port.postMessage({
-          type: "IN_MEMORY_CATALOG_REPLACE_SNAPSHOT_RESULT",
+          type: `${event.data.type}_RESULT`,
           request_id: event.data.request_id,
           ok: true,
         });

@@ -129,12 +129,12 @@ Creates the combined Dedicated Worker wrapping DuckDB-Wasm and the catalog metad
 
 ---
 
-### `catalog.withExclusiveUpdate(callback)`
+### `catalog.update(callback)`
 
 Acquires an exclusive gate in the catalog Worker after running DuckDB requests finish. New ordinary queries, including prepared statement queries on other connections in the same Worker, wait until the callback and all submitted scoped metadata operations finish.
 
 ```js
-await catalog.withExclusiveUpdate(async (update) => {
+await catalog.update(async (update) => {
   await storage.overwrite(fileId, parquetBytes)
   await update.replaceTable('analytics', {
     ...currentTable,
@@ -143,10 +143,12 @@ await catalog.withExclusiveUpdate(async (update) => {
 })
 ```
 
-The callback receives `publishSnapshot`, `replaceTable`, and `replaceView` methods with the same arguments as the controller methods. Perform remote file writes inside the callback, then publish metadata with a new `snapshot` value for every modified table. The callback's return value becomes the result of `withExclusiveUpdate`.
+All catalog publications, including the initial snapshot registered by `initialize`, run through `catalog.update`. The callback receives a scoped `CatalogUpdate` handle with `publishSnapshot`, `replaceTable`, and `replaceView`; these methods are available only inside that callback. Perform remote file writes there, then publish metadata with a new `snapshot` value for every modified table. The callback's return value becomes the result of `catalog.update`.
 
-- Use the supplied `update` methods inside the callback. **Do not await DuckDB queries, `diagnostics`, `close`, or another `withExclusiveUpdate` from it**: those operations wait for this callback to finish. Controller-level metadata methods reject while the callback is active.
-- A callback may complete without publishing metadata, including when no update is needed. Managed queries resume after normal completion. The scope expires when the callback settles; already submitted operations are drained even when not awaited. Await them in application code to make sequencing explicit.
+The callback defines the protected interval: file writes and metadata publication must both finish before reads resume. See [why updates use a callback](./guides.md#why-updates-use-a-callback) for the Parquet read consistency problem.
+
+- Use the supplied handle's methods inside the callback. **Do not await DuckDB queries, `catalog.diagnostics`, `catalog.close`, or another `catalog.update` from it**: those operations wait for this callback to finish.
+- A callback may complete without publishing metadata, including when no update is needed. Queries resume after normal completion. The scope expires when the callback settles; already submitted operations are drained even when not awaited. Metadata arguments are captured when a handle method is called, not when the callback is scheduled. Await them in application code to make sequencing explicit.
 - A callback or scoped publication failure sets `state` to `failed_closed` and invokes `onRecoveryRequired`. Catching a publication error inside the callback does not reopen the gate. The original failure is returned, and queued/new DuckDB queries reject with `RC_CATALOG_RECOVERY_REQUIRED`.
 - Remote writes are not rolled back. After a callback or publication failure, the Worker blocks further DuckDB work. Close the controllers, repair the files and metadata, and recreate the DuckDB Worker and controllers with the reconciled snapshot. There is no resume method on a failed Worker.
 - An active stream or pending query prevents acquisition: the update rejects before invoking the callback. Finish or cancel it before retrying. Starting a stream while an update is waiting or running also rejects; consume existing streams through their normal fetch/cancel APIs.
@@ -159,41 +161,41 @@ The attached DuckDB connection. Its ordinary `query` and prepared statement `que
 
 ---
 
-### `catalog.publishSnapshot(snapshot)`
+### `update.publishSnapshot(snapshot)`
 
 Atomically replaces the entire catalog state with a new snapshot:
 
 ```js
-await catalog.publishSnapshot(nextSnapshot)
+await catalog.update((update) => update.publishSnapshot(nextSnapshot))
 ```
 
 ---
 
-### `catalog.replaceTable(schemaName, table)`
+### `update.replaceTable(schemaName, table)`
 
 Atomically replaces the definition of an existing table:
 
 ```js
-await catalog.replaceTable('analytics', {
+await catalog.update((update) => update.replaceTable('analytics', {
   name: 'events',
   snapshot: 'v2',
   scanner: { type: 'parquet', options: {} },
   columns: [...],
   files: [...],
-})
+}))
 ```
 
 ---
 
-### `catalog.replaceView(schemaName, view)`
+### `update.replaceView(schemaName, view)`
 
 Atomically replaces the query definition of an existing view:
 
 ```js
-await catalog.replaceView('analytics', {
+await catalog.update((update) => update.replaceView('analytics', {
   name: 'recent_events',
   query: 'SELECT * FROM events WHERE is_active = true',
-})
+}))
 ```
 
 ---

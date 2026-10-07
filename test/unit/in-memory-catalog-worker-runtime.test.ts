@@ -68,9 +68,51 @@ class FakePort {
   async dispatch(message) {
     return this.onmessage?.({ data: message });
   }
+
+  async publish(message) {
+    const token = `update-${message.request_id}`;
+    await this.dispatch({ type: "IN_MEMORY_CATALOG_ACQUIRE_UPDATE", update_token: token });
+    assert.equal(this.messages.pop().ok, true);
+    await this.dispatch({ ...message, update_token: token });
+    await this.dispatch({ type: "IN_MEMORY_CATALOG_RELEASE_UPDATE", update_token: token });
+    assert.equal(this.messages.pop().ok, true);
+  }
 }
 
 describe("In-Memory Catalog Worker runtime", () => {
+  it("rejects every unscoped mutation and tokens used after release", async () => {
+    const store = new InMemoryCatalogMetadataStore();
+    const runtime = createInMemoryCatalogWorkerRuntime(store);
+    const port = new FakePort();
+    await runtime.handleMessage({
+      data: { type: "IN_MEMORY_CATALOG_OPEN_WORKSPACE_SESSION", workspace_id: "workspace" },
+      ports: [port],
+    });
+    for (const type of ["REPLACE_SNAPSHOT", "REPLACE_TABLE", "REPLACE_VIEW"]) {
+      await port.dispatch({
+        type: `IN_MEMORY_CATALOG_${type}`,
+        request_id: type,
+        snapshot: snapshot(),
+        schema_name: "main",
+        table: snapshot().schemas[0].tables[0],
+        view: { name: "view1", query: "SELECT 1" },
+      });
+      assert.equal(port.messages.at(-1).code, "RC_CATALOG_UPDATE_SCOPE");
+    }
+    assert.equal(runtime.bridge.currentRevision("workspace"), undefined);
+    await port.publish({
+      type: "IN_MEMORY_CATALOG_REPLACE_SNAPSHOT",
+      request_id: "initial",
+      snapshot: snapshot(),
+    });
+    await port.dispatch({
+      type: "IN_MEMORY_CATALOG_REPLACE_SNAPSHOT",
+      update_token: "update-initial",
+      snapshot: snapshot(),
+    });
+    assert.equal(port.messages.at(-1).code, "RC_CATALOG_UPDATE_SCOPE");
+    assert.equal(runtime.bridge.currentRevision("workspace"), "1");
+  });
   it("opens a dedicated session and exposes file descriptors to the current scanner implementation", async () => {
     const store = new InMemoryCatalogMetadataStore();
     const runtime = createInMemoryCatalogWorkerRuntime(store);
@@ -80,7 +122,7 @@ describe("In-Memory Catalog Worker runtime", () => {
       data: { type: "IN_MEMORY_CATALOG_OPEN_WORKSPACE_SESSION", workspace_id: "workspace" },
       ports: [port],
     });
-    await port.dispatch({
+    await port.publish({
       type: "IN_MEMORY_CATALOG_REPLACE_SNAPSHOT",
       request_id: "replace-1",
       snapshot: snapshot(),
@@ -123,7 +165,7 @@ describe("In-Memory Catalog Worker runtime", () => {
       type: "csv",
       options: { delimiter: "\t", header: true, skip: 1 },
     };
-    await port.dispatch({
+    await port.publish({
       type: "IN_MEMORY_CATALOG_REPLACE_SNAPSHOT",
       request_id: "replace-csv-1",
       snapshot: candidate,
@@ -151,7 +193,7 @@ describe("In-Memory Catalog Worker runtime", () => {
     candidate.schemas[0].tables[0].columns = [
       { name: "payload", type: "STRUCT(id BIGINT, tags VARCHAR[], raw JSON)", nullable: true },
     ];
-    await port.dispatch({
+    await port.publish({
       type: "IN_MEMORY_CATALOG_REPLACE_SNAPSHOT",
       request_id: "replace-json-1",
       snapshot: candidate,
@@ -175,7 +217,7 @@ describe("In-Memory Catalog Worker runtime", () => {
       type: "xlsx",
       options: { header: true, sheet: "Data", range: "A1:C20" },
     };
-    await port.dispatch({
+    await port.publish({
       type: "IN_MEMORY_CATALOG_REPLACE_SNAPSHOT",
       request_id: "replace-xlsx-1",
       snapshot: candidate,
@@ -195,7 +237,7 @@ describe("In-Memory Catalog Worker runtime", () => {
       data: { type: "IN_MEMORY_CATALOG_OPEN_WORKSPACE_SESSION", workspace_id: "workspace" },
       ports: [port],
     });
-    await port.dispatch({
+    await port.publish({
       type: "IN_MEMORY_CATALOG_REPLACE_SNAPSHOT",
       request_id: "replace-1",
       snapshot: snapshot(),
@@ -203,7 +245,7 @@ describe("In-Memory Catalog Worker runtime", () => {
 
     const replacement = snapshot("https://example.test/table-update").schemas[0].tables[0];
     replacement.snapshot = "snapshot-update";
-    await port.dispatch({
+    await port.publish({
       type: "IN_MEMORY_CATALOG_REPLACE_TABLE",
       request_id: "replace-table-1",
       schema_name: "MAIN",
@@ -231,7 +273,7 @@ describe("In-Memory Catalog Worker runtime", () => {
       data: { type: "IN_MEMORY_CATALOG_OPEN_WORKSPACE_SESSION", workspace_id: "workspace" },
       ports: [port],
     });
-    await port.dispatch({
+    await port.publish({
       type: "IN_MEMORY_CATALOG_REPLACE_SNAPSHOT",
       request_id: "replace-1",
       snapshot: viewSnapshot(),
@@ -247,7 +289,7 @@ describe("In-Memory Catalog Worker runtime", () => {
       query: "SELECT id FROM table1",
     });
 
-    await port.dispatch({
+    await port.publish({
       type: "IN_MEMORY_CATALOG_REPLACE_VIEW",
       request_id: "replace-view-1",
       schema_name: "MAIN",
@@ -272,7 +314,7 @@ describe("In-Memory Catalog Worker runtime", () => {
       data: { type: "IN_MEMORY_CATALOG_OPEN_WORKSPACE_SESSION", workspace_id: "workspace" },
       ports: [port],
     });
-    await port.dispatch({
+    await port.publish({
       type: "IN_MEMORY_CATALOG_REPLACE_SNAPSHOT",
       request_id: "replace-1",
       snapshot: snapshot(),

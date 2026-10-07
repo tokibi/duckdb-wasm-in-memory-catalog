@@ -28,7 +28,7 @@ If your infrastructure already manages tables with Lakehouse formats such as Apa
 
 - ⚡ **Declarative Catalog Publishing**: Expose application-managed metadata as a DuckDB catalog without manual DDL management.
 - 📦 **Multi-Format Scanners**: Native support for **Parquet**, **CSV**, **JSON**, and **XLSX** files.
-- 🔄 **Atomic Metadata Updates**: Publish whole-catalog snapshots (`publishSnapshot`) or update individual tables (`replaceTable`) atomically. Use `withExclusiveUpdate` to coordinate remote file overwrites with ordinary DuckDB queries in the same Worker.
+- 🔄 **Atomic Metadata Updates**: Publish whole-catalog snapshots (`publishSnapshot`) or update individual tables (`replaceTable`) atomically. Use `update` to coordinate remote file overwrites with ordinary DuckDB queries in the same Worker.
 - 🛡️ **Cache Isolation**: Attaches internal snapshot identifiers (`#duckdb-snapshot=...`) to remote URIs so DuckDB's HTTP/Parquet cache updates without modifying backend URLs.
 - 🔍 **SQL Views Support**: Publish declarative SQL views alongside tables with automatic invalidation and re-binding on updates.
 - 🧵 **Worker-Thread Isolation**: Catalog state validation and metadata resolution run in a Dedicated Worker, keeping the main UI thread responsive.
@@ -50,7 +50,7 @@ flowchart LR
   end
   Remote[(Remote Files<br/>Parquet / CSV / JSON / XLSX)]
 
-  App -->|publishSnapshot() / replaceTable()| Controller
+  App -->|update(callback)| Controller
   Controller -->|MessageChannel / Structured Clone| Store
   DuckDB --> Extension
   Extension -->|lookup table & columns| Store
@@ -153,7 +153,7 @@ console.log(result.toArray())
 Hot-swap a single table definition without disturbing other tables or re-attaching the catalog:
 
 ```js
-await catalog.replaceTable('analytics', {
+await catalog.update((update) => update.replaceTable('analytics', {
   name: 'events',
   snapshot: 'v2', // New snapshot ID invalidates DuckDB cache for this table
   scanner: { type: 'parquet', options: {} },
@@ -166,7 +166,7 @@ await catalog.replaceTable('analytics', {
     'https://example.com/data/events-2026-09.parquet',
     'https://example.com/data/events-2026-10.parquet',
   ],
-})
+}))
 ```
 
 ---

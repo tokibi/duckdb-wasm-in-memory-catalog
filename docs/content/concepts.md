@@ -25,17 +25,19 @@ The in-memory catalog enables **publishing application-owned metadata directly t
 
 ## 2. Catalog Lifecycle & Updates
 
-The controller offers two primary update mechanisms:
+All publications run inside `catalog.update(callback)`. The callback's handle offers two publication mechanisms:
 
 | Method | Target | Use Case |
 |---|---|---|
-| `publishSnapshot()` | Entire Catalog | Full schema overhaul, replacing all tables, initial setup |
-| `replaceTable()` / `replaceView()` | Single Table / View | Updating file URLs or schema for one table while preserving others |
+| `update.publishSnapshot()` | Entire Catalog | Full schema overhaul, replacing all tables, initial setup |
+| `update.replaceTable()` / `update.replaceView()` | Single Table / View | Updating file URLs or schema for one table while preserving others |
+
+The callback protects remote file writes and metadata publication from overlapping queries. See [why updates use a callback](./guides.md#why-updates-use-a-callback).
 
 ### Atomicity & Validation
-1. **Serialized Queue**: All controller operations are queued and delivered to the Dedicated Worker in calling order.
+1. **Exclusive Updates**: Controller updates are queued in calling order. Each callback runs after active ordinary queries finish, with new query starts blocked in the same Worker.
 2. **Strict Validation**: The worker validates schema constraints, column types, and scanner configurations before committing changes.
-3. **Atomic Commit**: If validation passes, the catalog state is swapped atomically. If validation fails, changes are rejected and existing state remains untouched.
+3. **Atomic Commit**: If validation passes, the catalog state is swapped atomically. Invalid metadata is not committed; any callback or publication failure stops queries until the files and metadata are reconciled and the Worker is recreated.
 4. **Internal Generation Tracking**: Each successful update increments an internal generation counter, automatically invalidating stale DuckDB table and view bindings.
 
 ---
@@ -108,4 +110,3 @@ Calling `catalog.close()` detaches the catalog and drops the worker workspace, b
 If your infrastructure already supports Lakehouse table formats such as Apache Iceberg or Delta Lake, adopting those formats is recommended for managing table metadata and transactions at the storage layer.
 
 The goal of this library is different: it allows lightweight application-owned data structures, such as schema definitions, column metadata, and file URL lists, to serve directly as table and view definitions for DuckDB-Wasm, without requiring dedicated table formats or storage-level metadata infrastructure.
-

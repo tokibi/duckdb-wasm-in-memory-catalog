@@ -48,7 +48,7 @@ function createSnapshot(datasetList) {
 }
 
 // Publish to catalog
-await catalog.publishSnapshot(createSnapshot(datasets))
+await catalog.update((update) => update.publishSnapshot(createSnapshot(datasets)))
 ```
 
 This eliminates procedural DDL statements (`CREATE TABLE`, `ALTER TABLE`) and ensures application state is directly reflected in DuckDB.
@@ -71,20 +71,34 @@ const nextSnapshot = {
   ],
 }
 
-await catalog.publishSnapshot(nextSnapshot)
+await catalog.update((update) => update.publishSnapshot(nextSnapshot))
 ```
 
-- **Atomicity**: The controller queues calls in order. The Dedicated Worker validates the snapshot before replacing state atomically. If validation fails, the existing catalog remains active.
+- **Atomicity**: The controller queues updates in order. The Dedicated Worker validates the snapshot before replacing state atomically. Invalid metadata is not applied, but the failed update stops further queries until the Worker is recreated.
 - **Async Handling**: If multiple async tasks produce snapshots, discard outdated snapshots before calling `publishSnapshot`.
 
 ---
+
+## Why Updates Use a Callback
+
+One SQL query can read a file more than once. For example, a remote Parquet scan can first read the footer metadata to locate columns and row groups, then fetch the relevant row data with additional Range requests.
+
+If a file is overwritten between those reads, DuckDB may combine metadata from the old file with row data from the new file. Offsets or lengths may no longer match, causing a read error or inconsistent results. Publishing a new catalog `snapshot` only changes the cache identity for subsequent scans; it does not make the requests of an in-progress scan refer to one file version.
+
+`catalog.update(callback)` protects the entire update interval, not just the metadata publication:
+
+1. Wait for ordinary queries already running in the same Worker to finish, then block new query starts.
+2. Run the callback, which overwrites the file and publishes its new catalog metadata.
+3. Resume queued queries after the callback and all submitted metadata operations complete. If the callback or publication fails, keep queries blocked for recovery.
+
+The function passed to `update` is a **callback**. It may also be a closure that captures application variables; the API uses its invocation and completion to define the protected interval. Locking only `replaceTable` would leave the preceding file overwrite unprotected, so even metadata-only updates use the same callback API. Initial publication by `initialize` uses this path too.
 
 ## Overwriting a File While Queries May Be Running
 
 Read through the normal DuckDB connection, such as `catalog.connection.query(sql)`. Enclose both the remote write and metadata update in one exclusive callback:
 
 ```js
-await catalog.withExclusiveUpdate(async (update) => {
+await catalog.update(async (update) => {
   await storage.overwrite(fileId, parquetBytes)
   await update.replaceTable('main', {
     ...currentTable,
@@ -93,7 +107,7 @@ await catalog.withExclusiveUpdate(async (update) => {
 })
 ```
 
-Existing ordinary queries finish before the write starts; subsequent queries on any connection in the same Worker wait until the callback and submitted publications finish. Use only the supplied `update` methods for catalog operations inside the callback, and do not await DuckDB queries there. If no update is needed, the callback may return without publishing metadata. When changing a file, update the affected table's `snapshot` as shown above. An active stream prevents the update from starting; finish or cancel it before retrying. New stream starts during an update reject. A callback or publication failure blocks DuckDB work until you repair the files and metadata and recreate the Worker and controllers. Other Workers, tabs, and external writers remain outside this coordination. See the [API reference](./reference.md#catalogwithexclusiveupdatecallback) for scope and recovery details.
+Existing ordinary queries finish before the write starts; subsequent queries on any connection in the same Worker wait until the callback and submitted publications finish. Use only the supplied `update` methods for catalog operations inside the callback, and do not await DuckDB queries there. If no update is needed, the callback may return without publishing metadata. When changing a file, update the affected table's `snapshot` as shown above. An active stream prevents the update from starting; finish or cancel it before retrying. New stream starts during an update reject. A callback or publication failure blocks DuckDB work until you repair the files and metadata and recreate the Worker and controllers. Other Workers, tabs, and external writers remain outside this coordination. See the [API reference](./reference.md#catalogupdatecallback) for scope and recovery details.
 
 ## Recipe 3: Hot-Swap a Single Table (`replaceTable`)
 
@@ -101,7 +115,7 @@ To update a single table's files or schema without disturbing other tables or re
 
 ```js
 // Update only the 'events' table in the 'main' schema
-await catalog.replaceTable('main', {
+await catalog.update((update) => update.replaceTable('main', {
   name: 'events',
   snapshot: 'events-v2', // Invalidates DuckDB cache for this table only
   scanner: { type: 'parquet', options: {} },
@@ -113,7 +127,7 @@ await catalog.replaceTable('main', {
     'https://cdn.example.com/events-part1.parquet',
     'https://cdn.example.com/events-part2.parquet',
   ],
-})
+}))
 ```
 
 - If the table or schema does not exist, an error is thrown.
@@ -142,13 +156,13 @@ const snapshot = {
     },
   ],
 }
-await catalog.publishSnapshot(snapshot)
+await catalog.update((update) => update.publishSnapshot(snapshot))
 
 // 2. Hot-swap the view query definition
-await catalog.replaceView('main', {
+await catalog.update((update) => update.replaceView('main', {
   name: 'active_users',
   query: 'SELECT id, email, created_at FROM users WHERE is_active = true AND verified = true',
-})
+}))
 ```
 
 - View columns and types are dynamically inferred by DuckDB when the query is bound (no `columns` field required).

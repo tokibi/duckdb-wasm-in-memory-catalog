@@ -48,7 +48,7 @@ function createSnapshot(datasetList) {
 }
 
 // カタログに反映
-await catalog.publishSnapshot(createSnapshot(datasets))
+await catalog.update((update) => update.publishSnapshot(createSnapshot(datasets)))
 ```
 
 これにより、`CREATE TABLE` などの DDL を組み立てて逐次実行する必要がなくなり、アプリケーション状態がそのままカタログ状態になります。
@@ -71,20 +71,34 @@ const nextSnapshot = {
   ],
 }
 
-await catalog.publishSnapshot(nextSnapshot)
+await catalog.update((update) => update.publishSnapshot(nextSnapshot))
 ```
 
-- **アトミック性**: コントローラーは呼び出し順にキューイングし、Dedicated Worker 内で検証した上でアトミックに適用します。検証に失敗した場合は現在のカタログが維持されます。
+- **アトミック性**: 更新を呼び出し順にキューイングし、Dedicated Worker 内で検証した上でアトミックに適用します。不正なメタデータは反映しませんが、更新の失敗後は Worker を再作成するまでクエリを停止します。
 - **注意点**: 非同期通信などで古いスナップショットが遅れて届く可能性がある場合は、アプリケーション側でタイムスタンプやバージョンを比較し、古い更新を破棄してください。
 
 ---
+
+## 更新にコールバックを使う理由
+
+一つの SQL クエリでも、ファイルの読み取りは一回で済むとは限りません。例えばリモートの Parquet を読む場合、まずフッターのメタデータから列や行グループの位置を調べ、その後、必要な行データを追加の Range リクエストで取得することがあります。
+
+その間にファイルが上書きされると、古いファイルのメタデータと新しいファイルの行データが混ざる可能性があります。位置や長さが合わなくなり、読み取りエラーや不整合な結果につながります。カタログの `snapshot` を変えるだけでは、後続の読み取りのキャッシュ識別子が変わるだけで、進行中の読み取りを同じファイルの版に揃えることはできません。
+
+そこで `catalog.update(callback)` は、メタデータの反映だけでなく、更新処理全体を次の順序で保護します。
+
+1. 同じ Worker で実行中の通常のクエリが終わるのを待ち、新しいクエリの開始を止めます。
+2. コールバック内でファイル本体を更新し、新しいカタログメタデータを反映します。
+3. コールバックと登録済みのメタデータ操作が完了したら、待機中のクエリを再開します。更新に失敗した場合は、復旧するまで停止を維持します。
+
+`update` に渡す関数の API 上の呼び方は「コールバック関数」です。外側の変数を参照するクロージャにもできますが、ここではその呼び出しから完了までを保護範囲として使っています。`replaceTable` だけを排他しても、その前のファイル上書きを保護できません。そのため、メタデータだけを変更する場合も同じコールバック形式を使います。`initialize` による初期登録もこの経路を通ります。
 
 ## クエリの実行中にファイルを上書きする
 
 読み取りには `catalog.connection.query(sql)` など、通常の DuckDB コネクションを使えます。ファイル本体とメタデータの更新を1つの排他的なコールバックにまとめます。
 
 ```js
-await catalog.withExclusiveUpdate(async (update) => {
+await catalog.update(async (update) => {
   await storage.overwrite(fileId, parquetBytes)
   await update.replaceTable('main', {
     ...currentTable,
@@ -93,7 +107,7 @@ await catalog.withExclusiveUpdate(async (update) => {
 })
 ```
 
-先行する通常のクエリが完了してからファイルを書き換え、コールバックと登録済みのメタデータ更新が終わるまで、同じ Worker の全コネクションの後続クエリを待たせます。コールバック内のカタログ操作には渡された `update` だけを使い、DuckDB のクエリを呼んで待たないでください。更新が不要なら、メタデータを更新せずに終了できます。ファイルを変更した場合は、上の例のように対象テーブルの `snapshot` を更新してください。読み取り中のストリームがある場合は、更新を開始せずに拒否します。読み取りを完了またはキャンセルしてから再試行してください。更新中の新しいストリーム開始も拒否します。コールバックや更新に失敗した場合は DuckDB 操作を停止するため、ファイルとメタデータを修復して Worker とコントローラーを再作成してください。別の Worker・タブ・外部アプリの操作は調整しません。詳細は [API リファレンス](./reference.md#catalogwithexclusiveupdatecallback)を参照してください。
+先行する通常のクエリが完了してからファイルを書き換え、コールバックと登録済みのメタデータ更新が終わるまで、同じ Worker の全コネクションの後続クエリを待たせます。コールバック内のカタログ操作には渡された `update` だけを使い、DuckDB のクエリを呼んで待たないでください。更新が不要なら、メタデータを更新せずに終了できます。ファイルを変更した場合は、上の例のように対象テーブルの `snapshot` を更新してください。読み取り中のストリームがある場合は、更新を開始せずに拒否します。読み取りを完了またはキャンセルしてから再試行してください。更新中の新しいストリーム開始も拒否します。コールバックや更新に失敗した場合は DuckDB 操作を停止するため、ファイルとメタデータを修復して Worker とコントローラーを再作成してください。別の Worker・タブ・外部アプリの操作は調整しません。詳細は [API リファレンス](./reference.md#catalogupdatecallback)を参照してください。
 
 ## レシピ 3: 単一テーブルを置換する (`replaceTable`)
 
@@ -101,7 +115,7 @@ await catalog.withExclusiveUpdate(async (update) => {
 
 ```js
 // 'main' スキーマの 'events' テーブルのみを更新
-await catalog.replaceTable('main', {
+await catalog.update((update) => update.replaceTable('main', {
   name: 'events',
   snapshot: 'events-v2', // スナップショットIDを更新して DuckDB キャッシュをリフレッシュ
   scanner: { type: 'parquet', options: {} },
@@ -113,7 +127,7 @@ await catalog.replaceTable('main', {
     'https://cdn.example.com/events-part1.parquet',
     'https://cdn.example.com/events-part2.parquet',
   ],
-})
+}))
 ```
 
 - 対象テーブルが存在しない場合はエラーとなります。
@@ -142,13 +156,13 @@ const snapshot = {
     },
   ],
 }
-await catalog.publishSnapshot(snapshot)
+await catalog.update((update) => update.publishSnapshot(snapshot))
 
 // 2. ビューのクエリ定義を置換
-await catalog.replaceView('main', {
+await catalog.update((update) => update.replaceView('main', {
   name: 'active_users',
   query: 'SELECT id, email, created_at FROM users WHERE is_active = true AND verified = true',
-})
+}))
 ```
 
 - ビューの列や型は、DuckDB がクエリ実行時に SQL をバインドして動的に導出します。スナップショット内に `columns` の定義は不要です。
