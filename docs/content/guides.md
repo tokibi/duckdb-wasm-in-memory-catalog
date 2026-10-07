@@ -93,7 +93,7 @@ await catalog.withExclusiveUpdate(async (update) => {
 })
 ```
 
-Existing managed queries finish before the write starts; subsequent queries wait until publication finishes. Use only the supplied `update` methods for catalog operations inside the callback. At least one publication is required. Any callback or publication failure blocks managed queries until you close the controller, repair the files and metadata, and initialize a new controller. This does not coordinate raw connection calls, other tabs/controllers, or external writers. See the [API reference](./reference.md#catalogwithexclusiveupdatecallback) for scope and recovery details.
+Existing managed queries finish before the write starts; subsequent queries wait until the callback and any submitted publications finish. Use only the supplied `update` methods for catalog operations inside the callback. If no update is needed, the callback may return without publishing metadata. When changing a file, update the affected table's `snapshot` as shown above. Any callback or publication failure blocks managed queries until you close the controller, repair the files and metadata, and initialize a new controller. This does not coordinate raw connection calls, other tabs/controllers, or external writers. See the [API reference](./reference.md#catalogwithexclusiveupdatecallback) for scope and recovery details.
 
 ## Recipe 3: Hot-Swap a Single Table (`replaceTable`)
 

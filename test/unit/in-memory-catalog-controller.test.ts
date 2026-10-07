@@ -257,9 +257,9 @@ describe("InMemoryCatalogController", () => {
     }
   });
 
-  it("requires metadata publication and prevents reuse of a completed update scope", async () => {
+  it("resumes queued reads after a no-op update and expires its scope", async () => {
     const store = new InMemoryCatalogMetadataStore();
-    const { db } = fakeDatabase();
+    const { db, queries } = fakeDatabase();
     const controller = await InMemoryCatalogController.initialize(
       db,
       runtimeWorker(createInMemoryCatalogWorkerRuntime(store)),
@@ -268,20 +268,25 @@ describe("InMemoryCatalogController", () => {
     );
     try {
       let scope;
-      await controller.withExclusiveUpdate(async (update) => {
+      const finish = deferred();
+      const exclusive = controller.withExclusiveUpdate(async (update) => {
         scope = update;
-        await update.publishSnapshot(snapshot());
+        await finish.promise;
+        return "unchanged";
       });
+      const read = controller.query("read after no-op");
+      await Promise.resolve();
+      assert.equal(queries.includes("read after no-op"), false);
+      finish.resolve();
+      assert.equal(await exclusive, "unchanged");
+      await read;
+      assert.equal(queries.includes("read after no-op"), true);
+      assert.equal(store.currentRevision("workspace"), 1n);
       await assert.rejects(
         scope.replaceTable("main", snapshot().schemas[0].tables[0]),
         (error) => error.code === "RC_CATALOG_UPDATE_SCOPE",
       );
       assert.equal(controller.state, "active");
-      await assert.rejects(
-        controller.withExclusiveUpdate(async () => {}),
-        (error) => error.code === "RC_CATALOG_UPDATE_REQUIRED",
-      );
-      assert.equal(controller.state, "failed_closed");
     } finally {
       await controller.close();
     }

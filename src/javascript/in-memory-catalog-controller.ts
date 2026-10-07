@@ -331,7 +331,6 @@ export class InMemoryCatalogController<
       let pending = Promise.resolve();
       let failed = false;
       let failure: unknown;
-      let publications = 0;
       const recordFailure = (error: unknown): void => {
         if (failed) return;
         failed = true;
@@ -355,7 +354,6 @@ export class InMemoryCatalogController<
         const operation = pending.then(async () => {
           if (failed) throw failure;
           await apply(captured);
-          publications += 1;
         });
         // Observe every submitted operation, including ones the callback does not await.
         pending = operation.catch(recordFailure);
@@ -380,12 +378,6 @@ export class InMemoryCatalogController<
         }
         await pending;
         if (failed) throw failure;
-        if (publications === 0) {
-          throw new InMemoryCatalogControllerError(
-            "RC_CATALOG_UPDATE_REQUIRED",
-            "An exclusive update must publish catalog metadata before queries resume",
-          );
-        }
         return result;
       } catch (error) {
         this.#exclusiveFailed = true;

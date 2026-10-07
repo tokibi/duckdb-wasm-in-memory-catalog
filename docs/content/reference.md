@@ -150,7 +150,7 @@ await catalog.withExclusiveUpdate(async (update) => {
 The callback receives `publishSnapshot`, `replaceTable`, and `replaceView` methods with the same arguments as the controller methods. Perform remote file writes inside the callback, then publish metadata with a new `snapshot` value for every modified table. The callback's return value becomes the result of `withExclusiveUpdate`.
 
 - Use the supplied `update` methods inside the callback. **Do not await `catalog.query`, `diagnostics`, `close`, or another `withExclusiveUpdate` from it**: those operations wait for this callback to finish. Controller-level metadata methods reject while the callback is active.
-- At least one scoped metadata publication must succeed. The scope expires when the callback settles; already submitted operations are drained even when not awaited. Await them in application code to make sequencing explicit.
+- A callback may complete without publishing metadata, including when no update is needed. Managed queries resume after normal completion. The scope expires when the callback settles; already submitted operations are drained even when not awaited. Await them in application code to make sequencing explicit.
 - A callback or scoped publication failure sets `state` to `failed_closed` and invokes `onRecoveryRequired`. Catching a publication error inside the callback does not reopen the queue. The original failure is returned, and queued/new managed queries reject with `RC_CATALOG_RECOVERY_REQUIRED`.
 - Remote writes are not rolled back. Recover by closing this controller, repairing the files and metadata, and initializing a new controller with the reconciled snapshot. There is no resume method on a failed controller.
 - This coordinates only operations submitted to this controller. Raw connections, streaming/prepared queries, other controllers, other tabs, and external file writers are outside the guarantee. Gateway and HTTP caches must also reflect the updated content; the catalog `snapshot` changes DuckDB's cache identity only.
@@ -226,7 +226,6 @@ Errors from the controller are instances of `InMemoryCatalogControllerError`:
 | `RC_CATALOG_WORKSPACE_CLOSED` | Invoked operation on an already closed controller. |
 | `RC_CATALOG_RECOVERY_REQUIRED` | Runtime entered an unrecoverable state requiring restart. |
 | `RC_CATALOG_UPDATE_SCOPE` | Metadata operation used outside its exclusive scope or after the scope expired. |
-| `RC_CATALOG_UPDATE_REQUIRED` | Exclusive callback completed without publishing metadata; recovery is required. |
 | `RC_METADATA_GENERATION_EXHAUSTED` | Internal generation counter overflow (recreate workspace). |
 
 ---
