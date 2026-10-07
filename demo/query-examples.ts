@@ -3,7 +3,7 @@ import { InMemoryCatalogController } from "../src/javascript/in-memory-catalog-c
 const originalClose = InMemoryCatalogController.prototype.close;
 InMemoryCatalogController.prototype.close = async function closeDemoCatalog() {
   try {
-    await this.query("USE memory");
+    await this.connection.query("USE memory");
   } catch {
     // The connection may already be closing. Preserve the controller's close behavior.
   }

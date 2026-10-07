@@ -143,6 +143,7 @@ function gatedDatabase() {
   };
   return {
     db,
+    store,
     gate,
     queries,
     held,
@@ -203,7 +204,7 @@ describe("InMemoryCatalogController", () => {
       { workspaceId: "workspace", catalogName: "dataset" },
       snapshot(),
     );
-    // Reserve a streaming request in the actual gate without using catalog.query.
+    // Reserve a streaming request in the actual gate through the normal DuckDB protocol.
     await f.send("SEND_PREPARED", [2, 1, []]);
     let called = false;
     await assert.rejects(
@@ -284,102 +285,63 @@ describe("InMemoryCatalogController", () => {
     await catalog.close();
   });
 
-  it("orders fully materialized reads, remote writes, scoped publication, and queued reads", async () => {
-    const store = new InMemoryCatalogMetadataStore();
-    const worker = runtimeWorker(createInMemoryCatalogWorkerRuntime(store));
-    const { db, connection } = fakeDatabase();
+  it("drains unawaited scoped publication before queued reads and expires the scope", async () => {
+    const f = gatedDatabase();
     const controller = await InMemoryCatalogController.initialize(
-      db,
-      worker,
+      f.db,
+      f.worker,
       { workspaceId: "workspace", catalogName: "dataset" },
       snapshot(),
     );
-    const readStarted = deferred();
-    const finishRead = deferred();
-    const writeStarted = deferred();
-    const finishWrite = deferred();
-    const events = [];
-    const originalQuery = connection.query;
-    connection.query = async function (sql) {
-      assert.equal(this, connection);
-      if (sql === "first") {
-        events.push("read started");
-        readStarted.resolve();
-        await finishRead.promise;
-        events.push("read finished");
-        return [1];
-      }
-      if (sql === "second") {
-        const table = store.lookupTable(
-          "workspace",
-          store.currentRevision("workspace").toString(),
-          "main",
-          "table1",
-        );
-        assert.equal(table.snapshot, "new-version");
-        events.push("next read");
-        return [2];
-      }
-      return originalQuery.call(this, sql);
-    };
-    const first = controller.query("first");
-    await readStarted.promise;
-    let expiredScope;
+    const started = deferred();
+    const finish = deferred();
+    let scope;
     const exclusive = controller.withExclusiveUpdate(async (update) => {
-      expiredScope = update;
-      events.push("write started");
-      writeStarted.resolve();
-      await finishWrite.promise;
-      events.push("write finished");
+      scope = update;
+      started.resolve();
+      await finish.promise;
       const table = snapshot().schemas[0].tables[0];
       table.snapshot = "new-version";
-      // Even an unawaited publication must finish before the next query starts.
       void update.replaceTable("main", table);
       table.snapshot = "not-submitted";
       return "updated";
     });
-    const second = controller.query("second");
-    await Promise.resolve();
-    assert.deepEqual(events, ["read started"]);
-    finishRead.resolve();
-    await writeStarted.promise;
-    await assert.rejects(
-      controller.publishSnapshot(snapshot()),
-      (error) => error.code === "RC_CATALOG_UPDATE_SCOPE",
+    await started.promise;
+    const read = controller.connection.query("after publication");
+    assert.equal(
+      f.queries.some((r) => r.data?.[1] === "after publication"),
+      false,
     );
-    await assert.rejects(
-      controller.replaceTable("main", snapshot().schemas[0].tables[0]),
-      (error) => error.code === "RC_CATALOG_UPDATE_SCOPE",
-    );
-    assert.deepEqual(events, ["read started", "read finished", "write started"]);
+    await assert.rejects(controller.publishSnapshot(snapshot()), {
+      code: "RC_CATALOG_UPDATE_SCOPE",
+    });
+    await assert.rejects(controller.replaceTable("main", snapshot().schemas[0].tables[0]), {
+      code: "RC_CATALOG_UPDATE_SCOPE",
+    });
     const close = controller.close();
-    assert.equal(connection.closed, false);
-    finishWrite.resolve();
-    assert.deepEqual(await first, [1]);
+    finish.resolve();
     assert.equal(await exclusive, "updated");
-    assert.deepEqual(await second, [2]);
-    await close;
-    assert.deepEqual(events, [
-      "read started",
-      "read finished",
-      "write started",
-      "write finished",
-      "next read",
-    ]);
-    assert.equal(connection.closed, true);
-    await assert.rejects(
-      expiredScope.publishSnapshot(snapshot()),
-      (error) => error.code === "RC_CATALOG_UPDATE_SCOPE",
+    await read;
+    assert.equal(
+      f.store.lookupTable(
+        "workspace",
+        f.store.currentRevision("workspace").toString(),
+        "main",
+        "table1",
+      ).snapshot,
+      "new-version",
     );
+    await close;
+    await assert.rejects(scope.publishSnapshot(snapshot()), { code: "RC_CATALOG_UPDATE_SCOPE" });
   });
 
   it("fails closed on a host failure and blocks queued work even while close drains", async () => {
-    const store = new InMemoryCatalogMetadataStore();
-    const { db, queries } = fakeDatabase();
+    const f = gatedDatabase();
+    const { db, queries } = f;
     const recovery = [];
     const controller = await InMemoryCatalogController.initialize(
       db,
-      runtimeWorker(createInMemoryCatalogWorkerRuntime(store)),
+      f.worker,
       {
         workspaceId: "workspace",
         catalogName: "dataset",
@@ -396,33 +358,36 @@ describe("InMemoryCatalogController", () => {
       throw originalError;
     });
     const updateRejected = assert.rejects(update, (error) => error === originalError);
-    const queryRejected = assert.rejects(
-      controller.query("must not run"),
-      (error) => error.code === "RC_CATALOG_RECOVERY_REQUIRED",
-    );
     const metadataRejected = assert.rejects(
       controller.publishSnapshot(snapshot()),
       (error) => error.code === "RC_CATALOG_RECOVERY_REQUIRED",
     );
     await started.promise;
+    const queryRejected = assert.rejects(
+      controller.connection.query("must not run"),
+      (error) => error.code === "RC_CATALOG_RECOVERY_REQUIRED",
+    );
     const close = controller.close();
     fail.resolve();
     await Promise.all([updateRejected, queryRejected, metadataRejected, close]);
-    assert.equal(queries.includes("must not run"), false);
+    assert.equal(
+      queries.some((r) => r.data?.[1] === "must not run"),
+      false,
+    );
     assert.equal(recovery.length, 1);
     await assert.rejects(
-      controller.query("still blocked"),
+      controller.connection.query("still blocked"),
       (error) => error.code === "RC_CATALOG_RECOVERY_REQUIRED",
     );
     assert.equal(recovery.length, 1);
   });
 
   it("keeps scoped metadata failures sticky even when the callback catches them", async () => {
-    const store = new InMemoryCatalogMetadataStore();
-    const { db } = fakeDatabase();
+    const f = gatedDatabase();
+    const { db } = f;
     const controller = await InMemoryCatalogController.initialize(
       db,
-      runtimeWorker(createInMemoryCatalogWorkerRuntime(store)),
+      f.worker,
       { workspaceId: "workspace", catalogName: "dataset" },
       snapshot(),
     );
@@ -438,7 +403,7 @@ describe("InMemoryCatalogController", () => {
       );
       assert.equal(controller.state, "failed_closed");
       await assert.rejects(
-        controller.query("blocked"),
+        controller.connection.query("blocked"),
         (error) => error.code === "RC_CATALOG_RECOVERY_REQUIRED",
       );
     } finally {
@@ -447,29 +412,38 @@ describe("InMemoryCatalogController", () => {
   });
 
   it("resumes queued reads after a no-op update and expires its scope", async () => {
-    const store = new InMemoryCatalogMetadataStore();
-    const { db, queries } = fakeDatabase();
+    const f = gatedDatabase();
+    const { db, queries, store } = f;
     const controller = await InMemoryCatalogController.initialize(
       db,
-      runtimeWorker(createInMemoryCatalogWorkerRuntime(store)),
+      f.worker,
       { workspaceId: "workspace", catalogName: "dataset" },
       snapshot(),
     );
     try {
       let scope;
       const finish = deferred();
+      const started = deferred();
       const exclusive = controller.withExclusiveUpdate(async (update) => {
         scope = update;
+        started.resolve();
         await finish.promise;
         return "unchanged";
       });
-      const read = controller.query("read after no-op");
+      await started.promise;
+      const read = controller.connection.query("read after no-op");
       await Promise.resolve();
-      assert.equal(queries.includes("read after no-op"), false);
+      assert.equal(
+        queries.some((r) => r.data?.[1] === "read after no-op"),
+        false,
+      );
       finish.resolve();
       assert.equal(await exclusive, "unchanged");
       await read;
-      assert.equal(queries.includes("read after no-op"), true);
+      assert.equal(
+        queries.some((r) => r.data?.[1] === "read after no-op"),
+        true,
+      );
       assert.equal(store.currentRevision("workspace"), 1n);
       await assert.rejects(
         scope.replaceTable("main", snapshot().schemas[0].tables[0]),
@@ -499,8 +473,8 @@ describe("InMemoryCatalogController", () => {
       return originalQuery.call(this, sql);
     };
     try {
-      const bad = assert.rejects(controller.query("bad query"), /SQL error/);
-      const good = controller.query("good query");
+      const bad = assert.rejects(controller.connection.query("bad query"), /SQL error/);
+      const good = controller.connection.query("good query");
       await bad;
       assert.equal(await good, rows);
       assert.equal(controller.state, "active");

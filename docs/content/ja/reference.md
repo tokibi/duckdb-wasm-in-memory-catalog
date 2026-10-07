@@ -129,10 +129,6 @@ DuckDB-Wasm とカタログメタデータストアが同居する Dedicated Wor
 
 ---
 
-### `catalog.query(sql)`
-
-カタログを attach したコネクションでクエリを実行し、全結果を取得してから返します。クエリ、メタデータ操作、排他的な更新は、コントローラーごとの共通キューで呼び出し順に実行されます。戻り値は元のコネクションのクエリ結果（Arrow Table など）です。
-
 ### `catalog.withExclusiveUpdate(callback)`
 
 実行中の DuckDB リクエストが完了してから、カタログ Worker 内の排他ロックを取得してコールバックを実行します。コールバックと、その中で登録したメタデータ操作が完了するまで、通常のクエリを待機させます。同じ Worker 内の別のコネクションや prepared statement のクエリも対象です。
@@ -149,7 +145,7 @@ await catalog.withExclusiveUpdate(async (update) => {
 
 コールバックには `publishSnapshot`、`replaceTable`、`replaceView` を持つ `update` が渡されます。引数はコントローラーの同名メソッドと同じです。ファイル本体の更新をコールバック内で行い、変更した各テーブルの `snapshot` を新しい値にしてメタデータを更新します。コールバックの戻り値は `withExclusiveUpdate` の戻り値になります。
 
-- コールバック内では渡された `update` を使ってください。**DuckDB のクエリ、`catalog.query`、`diagnostics`、`close`、別の `withExclusiveUpdate` を呼んで待たないでください。** これらは現在のコールバックの終了を待つため、互いに待機したままになります。コントローラー直接のメタデータ更新メソッドは、排他的な更新中はエラーになります。
+- コールバック内では渡された `update` を使ってください。**DuckDB のクエリ、`diagnostics`、`close`、別の `withExclusiveUpdate` を呼んで待たないでください。** これらは現在のコールバックの終了を待つため、互いに待機したままになります。コントローラー直接のメタデータ更新メソッドは、排他的な更新中はエラーになります。
 - 更新が不要な場合など、メタデータを更新せずにコールバックを終了できます。正常終了するとクエリを再開します。`update` はコールバック終了後には使えません。登録済みの操作は `await` されていなくても完了を待ちますが、アプリケーションでは順序を明確にするため `await` してください。
 - コールバックやメタデータ更新が失敗すると `state` が `failed_closed` になり、`onRecoveryRequired` が呼ばれます。コールバック内で更新エラーを捕捉しても再開しません。元のエラーを返し、待機中および新しいクエリは `RC_CATALOG_RECOVERY_REQUIRED` で拒否します。
 - ファイル本体の更新はロールバックしません。コールバックやメタデータ更新に失敗すると、その Worker の DuckDB 操作を停止します。復旧時はコントローラーを閉じ、ファイルとメタデータを修復してから、DuckDB Worker とコントローラーを再作成してください。失敗した Worker を再開する API はありません。
@@ -159,7 +155,7 @@ await catalog.withExclusiveUpdate(async (update) => {
 
 ### `catalog.connection`
 
-カタログを attach した DuckDB コネクションです。通常の `query` と prepared statement の `query` は Worker の排他制御で保護されます。同じ Worker の別のコネクションも対象です。`catalog.query` は、コントローラーの操作キューにも参加する任意の便利メソッドとして利用できます。ストリーミングには上記の制約があります。
+カタログを attach した DuckDB コネクションです。通常の `query` と prepared statement の `query` は Worker の排他制御で保護されます。同じ Worker の別のコネクションも対象です。メタデータの更新結果を使うクエリは、その更新を `await` してから実行してください。ストリーミングには上記の制約があります。
 
 ---
 

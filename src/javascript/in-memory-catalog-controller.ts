@@ -313,15 +313,6 @@ export class InMemoryCatalogController<
     return this.#state;
   }
 
-  /** Execute a fully materialized query through the controller's operation queue. */
-  // Public API; Fallow does not resolve calls through initialize()'s generic result.
-  // fallow-ignore-next-line unused-class-member
-  query(sql: string): Promise<Awaited<ReturnType<TConnection["query"]>>> {
-    return this.#enqueue(() => this.#connection.query(sql)) as Promise<
-      Awaited<ReturnType<TConnection["query"]>>
-    >;
-  }
-
   /**
    * Wait for materialized queries on the shared Worker, then exclude new starts while the host updates files and
    * publishes metadata through the supplied scope. Failures require closing and
